@@ -137,6 +137,34 @@ class XuiPanel:
         obj = data.get("obj")
         return obj if isinstance(obj, dict) else None
 
+    async def client_traffic(self, email: str) -> dict[str, int]:
+        empty = {"up": 0, "down": 0, "total": 0}
+        for path in (
+            f"/panel/api/inbounds/getClientTraffics/{quote(email, safe='')}",
+            f"/panel/api/clients/traffic/{quote(email, safe='')}",
+        ):
+            try:
+                data = await self._request("GET", path)
+            except PanelError:
+                continue
+            obj = data.get("obj")
+            if isinstance(obj, list):
+                obj = obj[0] if obj else None
+            if isinstance(obj, dict):
+                return {
+                    "up": int(obj.get("up") or 0),
+                    "down": int(obj.get("down") or 0),
+                    "total": int(obj.get("total") or obj.get("totalGB") or 0),
+                }
+        client = await self.get_client(email)
+        if not client:
+            return empty
+        return {
+            "up": int(client.get("up") or 0),
+            "down": int(client.get("down") or 0),
+            "total": int(client.get("total") or client.get("totalGB") or 0),
+        }
+
     async def client_links(self, email: str) -> list[str]:
         try:
             data = await self._request("GET", f"/panel/api/clients/links/{quote(email, safe='')}")
