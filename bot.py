@@ -222,7 +222,6 @@ def format_card(email: str, sub_id: str, expiry_ms: int, links: list[str]) -> st
         f"`{sub_url(sub_id)}`",
         "",
         "Отсканируйте QR или вставьте ссылку в v2rayNG, Hiddify, Streisand или Nekobox.",
-        "В ссылке уже все включённые протоколы, кроме MTProto.",
     ]
     return "\n".join(lines)
 
