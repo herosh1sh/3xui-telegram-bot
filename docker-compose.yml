@@ -1,0 +1,9 @@
+services:
+  bot:
+    build: .
+    image: 3xui-telegram-bot
+    container_name: 3xui-telegram-bot
+    env_file: .env
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data

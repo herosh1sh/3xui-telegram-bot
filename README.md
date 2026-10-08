@@ -112,7 +112,7 @@ VERIFY_SSL=false
 | `ONE_PER_USER` | `true` — повторная кнопка возвращает ту же ссылку. |
 | `MAX_CLIENTS` | Общий потолок выдач. `0` — без потолка. |
 | `ADMIN_IDS` | Telegram ID админов через запятую. Им доступны `/inbounds` и `/revoke`. |
-| `DB_PATH` | Файл базы бота. По умолчанию `data/subs.sqlite`. |
+| `DB_PATH` | Файл базы бота. По умолчанию `data/subs.sqlite`. В Docker не меняйте. |
 | `VERIFY_SSL` | `false`, если сертификат панели самоподписанный. |
 
 Срок и трафик задаются в момент выдачи. Уже выданную подписку смена `.env` не продлевает: её надо отозвать и выдать заново.
@@ -133,7 +133,41 @@ python bot.py
 
 Остановка в консоли: `Ctrl+C`.
 
-## 6. Автозапуск через systemd
+## 6. Запуск в Docker
+
+На сервере нужны Docker и плагин Compose. Панель 3x-ui в этот контейнер не входит: бот только ходит к ней по `PANEL_URL`.
+
+```bash
+git clone https://github.com/herosh1sh/3xui-telegram-bot.git
+cd 3xui-telegram-bot
+cp .env.example .env
+# заполнить .env
+mkdir -p data
+sudo chown 1000:1000 data
+docker compose up -d --build
+docker compose logs -f
+```
+
+`chown 1000:1000` нужен, потому что внутри контейнера бот работает от пользователя с uid 1000, а база лежит в `./data`. Без этого контейнер не сможет создать `subs.sqlite`.
+
+Контейнер читает `.env` при старте и не копирует его в образ. После правки `.env` перезапустите:
+
+```bash
+docker compose up -d
+```
+
+Полезные команды:
+
+```bash
+docker compose ps
+docker compose logs -f bot
+docker compose restart
+docker compose down
+```
+
+`docker compose down` контейнер останавливает, папку `data` не удаляет. Подписки пользователей остаются.
+
+## 7. Автозапуск через systemd
 
 Подставьте свой путь и пользователя.
 
@@ -172,5 +206,7 @@ journalctl -u 3xui-bot -f
 - Клиент создался, но не подключается — для Reality не задан `FLOW=xtls-rprx-vision`, либо неверный `INBOUND_IDS`.
 - Кнопки нет в ответ на `/start` — ваш ID не в `ADMIN_IDS`, а `ALLOW_ALL=false`.
 - Самоподписанный сертификат — поставьте `VERIFY_SSL=false`.
+- В Docker `permission denied` на `data/subs.sqlite` — выполните `sudo chown -R 1000:1000 data` и `docker compose restart`.
+- В Docker бот не видит новый `.env` — `docker compose up -d` ещё раз, обычный restart старые переменные не подхватывает.
 
 Старая панель без `POST /panel/api/clients/add` обрабатывается сама: бот пробует `POST /panel/api/inbounds/addClient`. Этот запасной путь умеет только один инбаунд.
