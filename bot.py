@@ -296,6 +296,22 @@ def format_card(
 
 
 async def live_sub(tg_id: int) -> dict | None:
+    try:
+        panel_client = await panel.find_by_telegram(tg_id)
+    except PanelError:
+        panel_client = None
+    if panel_client:
+        email = str(panel_client.get("email") or f"tg{tg_id}")
+        sub_id = str(panel_client.get("subId") or panel_client.get("sub_id") or "")
+        expiry = int(panel_client.get("expiryTime") or 0)
+        if not sub_id:
+            current = await store.get(tg_id)
+            sub_id = str(current["sub_id"]) if current else secrets.token_hex(8)
+        await store.save(tg_id, None, email, sub_id, expiry)
+        row = await store.get(tg_id)
+        if row is not None:
+            row["enable"] = panel_client.get("enable") is not False
+        return row
     row = await store.get(tg_id)
     if not row:
         return None
@@ -356,7 +372,10 @@ register(dp, store, bot, PLANS, ADMIN_IDS, issue, send_sub)
 
 
 def sub_active(row: dict | None) -> bool:
-    return bool(row and row["expiry_ms"] > int(time.time() * 1000))
+    if not row or row.get("enable") is False:
+        return False
+    expiry = int(row.get("expiry_ms") or 0)
+    return expiry == 0 or expiry > int(time.time() * 1000)
 
 
 @dp.message(F.text.endswith("Профиль"))
