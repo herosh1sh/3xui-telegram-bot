@@ -24,7 +24,14 @@ def emoji_id(key: str = "") -> str:
     return specific or env("BUTTON_EMOJI")
 
 
-def btn(text: str, *, callback_data: str | None = None, url: str | None = None, emoji: str = "") -> InlineKeyboardButton:
+def btn(
+    text: str,
+    *,
+    callback_data: str | None = None,
+    url: str | None = None,
+    emoji: str = "",
+    style: str | None = None,
+) -> InlineKeyboardButton:
     kwargs: dict = {"text": text}
     if callback_data:
         kwargs["callback_data"] = callback_data
@@ -33,11 +40,14 @@ def btn(text: str, *, callback_data: str | None = None, url: str | None = None, 
     icon = emoji_id(emoji)
     if icon:
         kwargs["icon_custom_emoji_id"] = icon
+    if style in {"primary", "success", "danger"}:
+        kwargs["style"] = style
     try:
         return InlineKeyboardButton(**kwargs)
     except TypeError:
-        log.warning("aiogram не знает icon_custom_emoji_id, обновите пакет: pip install -U 'aiogram>=3.22'")
+        log.warning("aiogram не знает style или icon_custom_emoji_id, обновите пакет: pip install -U 'aiogram>=3.22'")
         kwargs.pop("icon_custom_emoji_id", None)
+        kwargs.pop("style", None)
         return InlineKeyboardButton(**kwargs)
 
 
