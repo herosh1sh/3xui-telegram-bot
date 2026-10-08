@@ -4,3 +4,4 @@ aiosqlite>=0.20
 python-dotenv>=1.0
 yookassa>=3.0
 qrcode[pil]>=7.4
+aiohttp>=3.10

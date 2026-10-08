@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
     && useradd --create-home --uid 1000 bot \
     && chown -R bot:bot /app
 
-COPY bot.py xui.py db.py payments.py ./
+COPY bot.py xui.py db.py payments.py webapp.py ./
 
 USER bot
 
