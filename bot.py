@@ -447,7 +447,7 @@ async def start(message: Message) -> None:
     keyboard = main_keyboard(message.from_user.id)
     payload = message.text.split(maxsplit=1)[1] if message.text and " " in message.text else ""
     if payload == "paycancel":
-        await say(message, "Оплата отменена.", reply_markup=keyboard, image="pay")
+        await say(message, topup_text(), reply_markup=topup_menu(), image="topup")
         return
     if payload == "paypending":
         await say(message, "Оплата не завершена.", reply_markup=keyboard, image="pay")
@@ -604,7 +604,7 @@ async def cancel_payment(query: CallbackQuery) -> None:
         return
     await store.mark_order(order["order_id"], "canceled")
     await query.answer("Оплата отменена")
-    await say(query.message, "Оплата отменена. Деньги не списаны, баланс не изменился.", image="pay")
+    await say(query.message, topup_text(), reply_markup=topup_menu(), image="topup")
 
 
 @dp.callback_query(F.data.startswith("check:"))
