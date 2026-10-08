@@ -8,7 +8,6 @@ import logging
 import os
 import secrets
 import time
-from urllib.parse import quote, urlparse
 from pathlib import Path
 
 import qrcode
@@ -211,36 +210,9 @@ def qr_file(url: str) -> BufferedInputFile:
     return BufferedInputFile(buffer.getvalue(), filename="subscription.png")
 
 
-CLIENTS = (
-    ("happ", "Happ"),
-    ("hiddify", "Hiddify"),
-    ("v2rayng", "v2rayNG"),
-    ("streisand", "Streisand"),
-    ("incy", "INCY"),
-)
-
-
-def public_base() -> str:
-    raw = env("PUBLIC_URL") or env("YOOKASSA_RETURN_URL")
-    parsed = urlparse(raw)
-    if not parsed.scheme or not parsed.netloc:
-        return ""
-    return f"{parsed.scheme}://{parsed.netloc}"
-
-
-def import_menu(sub_id: str) -> InlineKeyboardMarkup:
-    link = sub_url(sub_id)
-    base = public_base()
-    buttons = []
-    for code, title in CLIENTS:
-        url = f"{base}/open/{code}?url={quote(link, safe='')}" if base else link
-        buttons.append(btn(title, url=url, emoji="sub"))
+def connect_menu(sub_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[
-            buttons[:3],
-            buttons[3:],
-            [btn("Вернуться", callback_data="back", emoji="back")],
-        ]
+        inline_keyboard=[[btn("Подключиться", url=sub_url(sub_id), emoji="sub", style="success")]]
     )
 
 
@@ -252,7 +224,7 @@ def back_only() -> InlineKeyboardMarkup:
 
 async def send_sub(message: Message, text: str, sub_id: str) -> None:
     caption = text if len(text) <= 1000 else text[:1000].rsplit("\n", 1)[0]
-    markup = import_menu(sub_id)
+    markup = connect_menu(sub_id)
     try:
         await message.answer_photo(
             qr_file(sub_url(sub_id)),
@@ -318,7 +290,7 @@ def format_card(
         "Ссылка подписки:",
         f"`{sub_url(sub_id)}`",
         "",
-        "Отсканируйте QR или импортируйте подписку кнопкой: Happ, Hiddify, v2rayNG, Streisand, INCY.",
+        "Отсканируйте QR или нажмите «Подключиться».",
     ]
     return "\n".join(lines)
 
