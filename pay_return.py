@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import quote, unquote
+
 from aiohttp import web
 
 PAGE = """<!doctype html>
@@ -73,3 +75,28 @@ def add_routes(app: web.Application, store, pays, bot) -> None:
         return web.Response(text=html, content_type="text/html")
 
     app.router.add_get("/pay/return", pay_return)
+
+    async def open_client(request: web.Request) -> web.Response:
+        client = request.match_info["client"]
+        target = unquote(request.query.get("url", ""))
+        schemes = {
+            "happ": "happ://add/{url}",
+            "hiddify": "hiddify://import/{url}#HeroshishVPN",
+            "v2rayng": "v2rayng://install-sub?url={quoted}",
+            "streisand": "streisand://import/{url}",
+            "incy": "incy://add/{url}",
+        }
+        names = {
+            "happ": "Happ",
+            "hiddify": "Hiddify",
+            "v2rayng": "v2rayNG",
+            "streisand": "Streisand",
+            "incy": "INCY",
+        }
+        if client not in schemes or not target.startswith("http"):
+            return web.Response(status=404, text="Неизвестный клиент")
+        deep = schemes[client].format(url=target, quoted=quote(target, safe=""))
+        html = page(f"Импорт в {names[client]}", "Если приложение не открылось, нажмите кнопку ниже.", deep, "#93c5fd")
+        return web.Response(text=html, content_type="text/html")
+
+    app.router.add_get("/open/{client}", open_client)
