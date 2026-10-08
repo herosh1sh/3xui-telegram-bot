@@ -187,6 +187,25 @@ class XuiPanel:
         }
         await self._request("POST", "/panel/api/inbounds/addClient", json=legacy)
 
+    async def extend_client(self, email: str, expiry_ms: int, total_bytes: int) -> None:
+        payload = {"email": email, "expiryTime": expiry_ms, "totalGB": total_bytes, "enable": True}
+        try:
+            await self._request("POST", f"/panel/api/clients/update/{quote(email, safe='')}", json=payload)
+            return
+        except PanelError as modern_err:
+            log.info("modern update failed: %s", modern_err)
+        client = await self.get_client(email)
+        client_id = ""
+        if client:
+            client_id = str(client.get("id") or client.get("uuid") or "")
+        if not client_id:
+            raise PanelError("не удалось продлить клиента: панель не отдала id")
+        await self._request(
+            "POST",
+            f"/panel/api/inbounds/updateClient/{quote(client_id, safe='')}",
+            json={"id": client_id, "expiryTime": expiry_ms, "totalGB": total_bytes, "enable": True},
+        )
+
     async def delete_client(self, email: str) -> None:
         try:
             await self._request("POST", f"/panel/api/clients/del/{quote(email, safe='')}")
