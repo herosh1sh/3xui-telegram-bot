@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from aiogram import F
 from aiogram.filters import BaseFilter
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message, ReplyKeyboardMarkup
@@ -29,7 +31,8 @@ def admin_menu() -> InlineKeyboardMarkup:
                 btn("Выдать подписку", callback_data="adm:sub", emoji="admin", style="primary"),
                 btn("Себе баланс", callback_data="adm:selfbal", emoji="admin", style="success"),
                 btn("Себе подписку", callback_data="adm:selfsub", emoji="admin", style="primary"),
-            ]
+            ],
+            [btn("Оповещение", callback_data="adm:announce", emoji="admin", style="danger")],
         ]
     )
 
@@ -113,6 +116,44 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
         await query.answer()
         await say(query.message, "Введите сумму в рублях. Она начислится вам.")
 
+    @dp.callback_query(F.data == "adm:announce")
+    async def ask_announce(query: CallbackQuery) -> None:
+        user = query.from_user
+        if not user or not allowed(user.id):
+            await query.answer("Нет доступа", show_alert=True)
+            return
+        waiting[user.id] = {"mode": "announce"}
+        await query.answer()
+        await say(query.message, "Напишите текст оповещения. Он уйдёт всем пользователям бота.", image="admin")
+
+    @dp.message(F.text, WaitingAdmin(waiting))
+    async def admin_announce(message: Message) -> None:
+        user = message.from_user
+        if not user or not allowed(user.id) or user.id not in waiting:
+            return
+        if waiting[user.id].get("mode") != "announce":
+            return
+        text = (message.text or "").strip()
+        waiting.pop(user.id, None)
+        if not text or text == "Админка":
+            await say(message, "Оповещение отменено.", reply_markup=admin_menu(), image="admin")
+            return
+        ids = await store.list_user_ids()
+        sent = failed = 0
+        for tg_id in ids:
+            try:
+                await notify(bot, tg_id, text, image="menu")
+                sent += 1
+            except Exception:
+                failed += 1
+            await asyncio.sleep(0.05)
+        await say(
+            message,
+            f"Оповещение отправлено. Доставлено: {sent}. Не дошло: {failed}.",
+            reply_markup=admin_menu(),
+            image="admin",
+        )
+
     @dp.callback_query(F.data == "adm:selfsub")
     async def ask_self_sub(query: CallbackQuery) -> None:
         user = query.from_user
@@ -155,6 +196,8 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
         if not user or not allowed(user.id) or user.id not in waiting:
             return
         state = waiting[user.id]
+        if state.get("mode") == "announce":
+            return
         value = int(message.text or "0")
         mode = state.get("mode")
         if mode == "balance" and "tg_id" not in state:
