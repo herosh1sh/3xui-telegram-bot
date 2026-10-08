@@ -135,6 +135,12 @@ class Store:
             row = await cur.fetchone()
             return int(row[0]) if row else 0
 
+    async def list_user_ids(self) -> list[int]:
+        async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute("SELECT tg_id FROM users")
+            rows = await cur.fetchall()
+            return [int(row[0]) for row in rows]
+
     async def user_exists(self, tg_id: int) -> bool:
         async with aiosqlite.connect(self.path) as db:
             cur = await db.execute("SELECT 1 FROM users WHERE tg_id = ?", (tg_id,))
