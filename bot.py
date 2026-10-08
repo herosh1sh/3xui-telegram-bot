@@ -252,9 +252,20 @@ def format_card(
     return "\n".join(lines)
 
 
+async def live_sub(tg_id: int) -> dict | None:
+    row = await store.get(tg_id)
+    if not row:
+        return None
+    exists = await panel.client_exists(row["email"])
+    if exists is False:
+        await store.delete(tg_id)
+        return None
+    return row
+
+
 async def issue(tg_id: int, username: str | None, days: int) -> tuple[str, str]:
     email = f"tg{tg_id}"
-    existing = await store.get(tg_id)
+    existing = await live_sub(tg_id)
     now_ms = int(time.time() * 1000)
     base = existing["expiry_ms"] if existing and existing["expiry_ms"] > now_ms else now_ms
     expiry_ms = base + days * 86400 * 1000
@@ -507,7 +518,7 @@ async def my_sub(query: CallbackQuery) -> None:
         await query.answer("Нет доступа", show_alert=True)
         return
     await query.answer()
-    existing = await store.get(user.id)
+    existing = await live_sub(user.id)
     if not sub_active(existing):
         await query.message.answer("Подписка не активна. Выберите тариф.", reply_markup=plans_menu())
         return
