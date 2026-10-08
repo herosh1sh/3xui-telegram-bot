@@ -137,6 +137,20 @@ class XuiPanel:
         obj = data.get("obj")
         return obj if isinstance(obj, dict) else None
 
+    async def client_exists(self, email: str) -> bool | None:
+        try:
+            data = await self._request("GET", f"/panel/api/clients/get/{quote(email, safe='')}")
+        except PanelError as exc:
+            msg = str(exc).lower()
+            if any(part in msg for part in ("404", "not found", "не найден", "no such", "record not found")):
+                return False
+            log.info("client lookup failed, keeping local sub: %s", exc)
+            return None
+        obj = data.get("obj")
+        if isinstance(obj, dict) and (obj.get("email") or obj.get("id") or obj.get("subId") or obj.get("uuid")):
+            return True
+        return False
+
     async def client_traffic(self, email: str) -> dict[str, int]:
         empty = {"up": 0, "down": 0, "total": 0}
         for path in (
