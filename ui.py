@@ -30,9 +30,36 @@ def env(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
 
 
-def emoji_id(key: str = "") -> str:
+def emoji_raw(key: str = "") -> str:
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except Exception:
+        pass
     specific = env(f"BUTTON_EMOJI_{key.upper()}") if key else ""
     return specific or env("BUTTON_EMOJI")
+
+
+def emoji_parts(key: str = "") -> tuple[str, str]:
+    raw = emoji_raw(key)
+    if not raw:
+        return "", ""
+    if raw.isdigit():
+        return "", raw
+    if raw.lower().startswith("id:"):
+        icon = raw.split(":", 1)[1].strip()
+        return "", icon if icon.isdigit() else ""
+    chunks = raw.split()
+    if len(chunks) == 2 and chunks[1].isdigit():
+        return chunks[0], chunks[1]
+    return raw, ""
+
+
+def with_emoji(text: str, key: str = "") -> tuple[str, str]:
+    glyph, icon = emoji_parts(key)
+    if glyph and not text.startswith(glyph):
+        text = f"{glyph} {text}"
+    return text, icon
 
 
 def btn(
@@ -43,12 +70,12 @@ def btn(
     emoji: str = "",
     style: str | None = None,
 ) -> InlineKeyboardButton:
+    text, icon = with_emoji(text, emoji)
     kwargs: dict = {"text": text}
     if callback_data:
         kwargs["callback_data"] = callback_data
     if url:
         kwargs["url"] = url
-    icon = emoji_id(emoji)
     if icon:
         kwargs["icon_custom_emoji_id"] = icon
     if style in {"primary", "success", "danger"}:
@@ -63,8 +90,8 @@ def btn(
 
 
 def key_btn(text: str, *, emoji: str = "", style: str | None = None) -> KeyboardButton:
+    text, icon = with_emoji(text, emoji)
     kwargs: dict = {"text": text}
-    icon = emoji_id(emoji)
     if icon:
         kwargs["icon_custom_emoji_id"] = icon
     if style in {"primary", "success", "danger"}:
