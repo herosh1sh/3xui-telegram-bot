@@ -338,17 +338,15 @@ async def start(message: Message) -> None:
     await store.ensure_user(message.from_user.id, message.from_user.username)
     payload = message.text.split(maxsplit=1)[1] if message.text and " " in message.text else ""
     if payload == "paycancel":
-        await say(message, "Оплата отменена. Деньги не списаны, баланс не изменился.", reply_markup=menu())
+        await say(message, "Оплата отменена.", reply_markup=menu())
         return
     if payload == "paypending":
-        await say(message, "Оплата не завершена. Баланс не изменился.", reply_markup=menu())
+        await say(message, "Оплата не завершена.", reply_markup=menu())
         return
     if payload == "paysuccess":
-        await say(message, "Оплата прошла. Если баланс ещё не обновился, нажмите «Проверить оплату».", reply_markup=menu())
+        await say(message, "Оплата прошла.", reply_markup=menu())
         return
     await say(message, "HeroshishVPN. Выберите действие.", reply_markup=menu())
-    if message.from_user.id in ADMIN_IDS:
-        await message.answer("\u2060", reply_markup=admin_reply())
 
 
 @dp.callback_query(F.data == "back")
