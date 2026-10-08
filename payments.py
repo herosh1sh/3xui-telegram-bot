@@ -49,7 +49,7 @@ class Payments:
         )
         self.io_project = io_project
         self.io_api_key = io_api_key
-        self.io_return_url = io_return_url or "https://t.me"
+        self.io_return_url = io_return_url or self.yookassa_return_url
         self.http = httpx.AsyncClient(timeout=30)
 
     def enabled(self) -> list[tuple[str, str]]:
@@ -65,6 +65,10 @@ class Payments:
     async def close(self) -> None:
         await self.http.aclose()
 
+    def _with_order(self, url: str, order_id: str) -> str:
+        sep = "&" if "?" in url else "?"
+        return f"{url}{sep}order_id={order_id}"
+
     async def create(self, provider: str, order_id: str, amount_rub: int, days: int) -> Invoice:
         if provider == "yookassa":
             return await self._yookassa(order_id, amount_rub, days)
@@ -75,13 +79,16 @@ class Payments:
         raise PayError("неизвестный способ оплаты")
 
     async def is_paid(self, provider: str, provider_id: str) -> bool:
+        return await self.status(provider, provider_id) == "succeeded"
+
+    async def status(self, provider: str, provider_id: str) -> str:
         if provider == "yookassa":
-            return await self._yookassa_paid(provider_id)
+            return await self._yookassa_status(provider_id)
         if provider == "cryptopay":
-            return await self._cryptopay_paid(provider_id)
+            return await self._cryptopay_status(provider_id)
         if provider == "2328":
-            return await self._2328_paid(provider_id)
-        return False
+            return "succeeded" if await self._2328_paid(provider_id) else "canceled"
+        return "canceled"
 
     async def _yookassa(self, order_id: str, amount_rub: int, days: int) -> Invoice:
         def create() -> Invoice:
@@ -92,7 +99,7 @@ class Payments:
             payment = Payment.create(
                 {
                     "amount": {"value": f"{amount_rub:.2f}", "currency": "RUB"},
-                    "confirmation": {"type": "redirect", "return_url": self.yookassa_return_url},
+                    "confirmation": {"type": "redirect", "return_url": self._with_order(self.yookassa_return_url, order_id)},
                     "capture": True,
                     "description": f"Подписка {days} дней",
                     "metadata": {"order_id": order_id},
@@ -103,14 +110,13 @@ class Payments:
 
         return await asyncio.to_thread(create)
 
-    async def _yookassa_paid(self, payment_id: str) -> bool:
-        def check() -> bool:
+    async def _yookassa_status(self, payment_id: str) -> str:
+        def check() -> str:
             from yookassa import Configuration, Payment
 
             Configuration.account_id = self.yookassa_shop_id
             Configuration.secret_key = self.yookassa_secret
-            payment = Payment.find_one(payment_id)
-            return str(payment.status) == "succeeded"
+            return str(Payment.find_one(payment_id).status)
 
         return await asyncio.to_thread(check)
 
@@ -125,6 +131,8 @@ class Payments:
                 "description": f"Подписка {days} дней",
                 "payload": order_id,
                 "expires_in": 3600,
+                "paid_btn_name": "callback",
+                "paid_btn_url": self._with_order(self.yookassa_return_url, order_id),
             },
         )
         data = resp.json()
@@ -133,7 +141,7 @@ class Payments:
         result = data["result"]
         return Invoice(str(result["invoice_id"]), str(result["bot_invoice_url"]))
 
-    async def _cryptopay_paid(self, invoice_id: str) -> bool:
+    async def _cryptopay_status(self, invoice_id: str) -> str:
         resp = await self.http.get(
             f"{self.cryptopay_base}/getInvoices",
             headers={"Crypto-Pay-API-Token": self.cryptopay_token},
@@ -143,7 +151,10 @@ class Payments:
         if not data.get("ok"):
             raise PayError(str(data.get("error") or resp.text[:200]))
         items = data.get("result", {}).get("items") or data.get("result") or []
-        return any(str(item.get("invoice_id")) == invoice_id and item.get("status") == "paid" for item in items)
+        for item in items:
+            if str(item.get("invoice_id")) == invoice_id:
+                return "succeeded" if item.get("status") == "paid" else "canceled"
+        return "canceled"
 
     async def _2328(self, order_id: str, amount_rub: int, days: int) -> Invoice:
         body = json.dumps(
@@ -151,7 +162,7 @@ class Payments:
                 "amount": f"{amount_rub:.2f}",
                 "currency": "RUB",
                 "order_id": order_id,
-                "url_return": self.io_return_url,
+                "url_return": self._with_order(self.io_return_url, order_id),
                 "description": f"Подписка {days} дней",
             },
             ensure_ascii=False,
@@ -178,9 +189,8 @@ class Payments:
         return Invoice(provider_id, pay_url)
 
     async def _2328_paid(self, provider_id: str) -> bool:
-        path = f"/v1/payment/{provider_id}"
         resp = await self.http.get(
-            f"https://api.2328.io/api{path}",
+            f"https://api.2328.io/api/v1/payment/{provider_id}",
             headers={
                 "User-Agent": "3xui-bot/1.0",
                 "project": self.io_project,
