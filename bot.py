@@ -102,9 +102,9 @@ def menu() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 btn("Профиль", callback_data="profile", emoji="profile", style="success"),
-                btn("Моя подписка", callback_data="my_sub", emoji="sub", style="primary"),
-                btn("Пополнить баланс", callback_data="topup", emoji="topup", style="success"),
-                btn("Поддержка", url=SUPPORT_URL, emoji="support"),
+                btn("Подписка", callback_data="my_sub", emoji="sub", style="primary"),
+                btn("Баланс", callback_data="topup", emoji="topup", style="success"),
+                btn("Помощь", url=SUPPORT_URL, emoji="support"),
                 btn("О нас", callback_data="about", emoji="about"),
             ]
         ]
@@ -118,12 +118,7 @@ def plans_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                btn(
-                    f"{days} дней — {price} ₽",
-                    callback_data=f"buy:{days}",
-                    emoji="plan",
-                    style=PLAN_STYLE[days],
-                )
+                btn(f"{days}д {price}", callback_data=f"buy:{days}", emoji="plan", style=PLAN_STYLE[days])
                 for days, price in PLANS.items()
             ]
             + [btn("Назад", callback_data="back", emoji="back")]
@@ -134,9 +129,9 @@ def plans_menu() -> InlineKeyboardMarkup:
 def topup_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [btn(f"{amount} ₽", callback_data=f"top:{amount}", emoji="topup") for amount in TOPUP],
+            [btn(str(amount), callback_data=f"top:{amount}", emoji="topup") for amount in TOPUP],
             [
-                btn("Другая сумма", callback_data="top:custom", emoji="topup"),
+                btn("Другая", callback_data="top:custom", emoji="topup"),
                 btn("Назад", callback_data="back", emoji="back"),
             ],
         ]
@@ -156,7 +151,7 @@ def about_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                btn("Политика конфиденциальности", url=PRIVACY_URL, emoji="about"),
+                btn("Политика", url=PRIVACY_URL, emoji="about"),
                 btn("Оферта", url=OFFER_URL, emoji="about"),
                 btn("Канал", url=CHANNEL_URL, emoji="about"),
                 btn("Назад", callback_data="back", emoji="back"),
@@ -214,7 +209,7 @@ async def send_sub(message: Message, text: str, sub_id: str) -> None:
     rest = text[len(caption):].strip()
     while rest:
         chunk, rest = rest[:3500], rest[3500:]
-        await say(message, chunk)
+        await say(message, chunk, image="sub")
 
 
 def format_bytes(value: int) -> str:
@@ -337,10 +332,10 @@ async def emoji_ids(message: Message) -> None:
     entities = list(message.entities or []) + list(message.caption_entities or [])
     ids = [entity.custom_emoji_id for entity in entities if getattr(entity, "custom_emoji_id", None)]
     if not ids:
-        await say(message, "Пришлите /emoji вместе с Premium-эмодзи. В ответе будет его ID для .env.")
+        await say(message, "Пришлите /emoji вместе с Premium-эмодзи. В ответе будет его ID для .env.", image="menu")
         return
     lines = ["ID Premium-эмодзи:"] + [f"`{item}`" for item in ids]
-    await say(message, "\n".join(lines))
+    await say(message, "\n".join(lines), image="menu")
 
 
 @dp.message(CommandStart())
@@ -348,32 +343,32 @@ async def start(message: Message) -> None:
     if not message.from_user:
         return
     if not allowed(message.from_user.id):
-        await say(message, "Бот доступен только администраторам.")
+        await say(message, "Бот доступен только администраторам.", image="menu")
         return
     await store.ensure_user(message.from_user.id, message.from_user.username)
     payload = message.text.split(maxsplit=1)[1] if message.text and " " in message.text else ""
     if payload == "paycancel":
-        await say(message, "Оплата отменена.", reply_markup=menu())
+        await say(message, "Оплата отменена.", reply_markup=menu(), image="pay")
         return
     if payload == "paypending":
-        await say(message, "Оплата не завершена.", reply_markup=menu())
+        await say(message, "Оплата не завершена.", reply_markup=menu(), image="pay")
         return
     if payload == "paysuccess":
-        await say(message, "Оплата прошла.", reply_markup=menu())
+        await say(message, "Оплата прошла.", reply_markup=menu(), image="pay")
         return
-    await say(message, "HeroshishVPN. Выберите действие.", reply_markup=menu())
+    await say(message, "HeroshishVPN. Выберите действие.", reply_markup=menu(), image="menu")
 
 
 @dp.callback_query(F.data == "back")
 async def back(query: CallbackQuery) -> None:
     await query.answer()
-    await say(query.message, "Главное меню.", reply_markup=menu())
+    await say(query.message, "Главное меню.", reply_markup=menu(), image="menu")
 
 
 @dp.callback_query(F.data == "about")
 async def about(query: CallbackQuery) -> None:
     await query.answer()
-    await say(query.message, "О нас", reply_markup=about_menu())
+    await say(query.message, "О нас", reply_markup=about_menu(), image="about")
 
 
 @dp.callback_query(F.data == "profile")
@@ -397,6 +392,7 @@ async def profile(query: CallbackQuery) -> None:
         ),
         parse_mode="Markdown",
         reply_markup=profile_menu(),
+        image="profile",
     )
 
 
@@ -406,7 +402,7 @@ async def plans(query: CallbackQuery) -> None:
         await query.answer("Нет доступа", show_alert=True)
         return
     await query.answer()
-    await say(query.message, "Тарифы списываются с баланса.", reply_markup=plans_menu())
+    await say(query.message, "Тарифы списываются с баланса.", reply_markup=plans_menu(), image="plans")
 
 
 @dp.callback_query(F.data == "topup")
@@ -415,7 +411,7 @@ async def topup(query: CallbackQuery) -> None:
         await query.answer("Нет доступа", show_alert=True)
         return
     await query.answer()
-    await say(query.message, "Сумма пополнения:", reply_markup=topup_menu())
+    await say(query.message, "Сумма пополнения:", reply_markup=topup_menu(), image="topup")
 
 
 @dp.callback_query(F.data.startswith("top:"))
@@ -427,14 +423,14 @@ async def choose_topup(query: CallbackQuery) -> None:
     if amount_raw == "custom":
         waiting_amount.add(query.from_user.id)
         await query.answer()
-        await say(query.message, "Введите сумму в рублях целым числом.")
+        await say(query.message, "Введите сумму в рублях целым числом.", image="topup")
         return
     amount = int(amount_raw)
     if amount < 1 or amount > MAX_TOPUP or not pays.enabled():
         await query.answer("Пополнение недоступно", show_alert=True)
         return
     await query.answer()
-    await say(query.message, f"Пополнение на {amount} ₽. Выберите способ.", reply_markup=pay_menu(amount))
+    await say(query.message, f"Пополнение на {amount} ₽. Выберите способ.", reply_markup=pay_menu(amount), image="pay")
 
 
 @dp.message(F.text.regexp(r"^\d+$"))
@@ -445,9 +441,9 @@ async def custom_amount(message: Message) -> None:
     waiting_amount.discard(user.id)
     amount = int(message.text or "0")
     if amount < 1 or amount > MAX_TOPUP:
-        await say(message, f"Сумма от 1 до {MAX_TOPUP} ₽.", reply_markup=topup_menu())
+        await say(message, f"Сумма от 1 до {MAX_TOPUP} ₽.", reply_markup=topup_menu(), image="topup")
         return
-    await say(message, f"Пополнение на {amount} ₽. Выберите способ.", reply_markup=pay_menu(amount))
+    await say(message, f"Пополнение на {amount} ₽. Выберите способ.", reply_markup=pay_menu(amount), image="pay")
 
 
 @dp.callback_query(F.data.startswith("pay:"))
@@ -468,17 +464,18 @@ async def create_payment(query: CallbackQuery) -> None:
         invoice = await pays.create(provider, order_id, amount, 0)
     except (PayError, Exception) as exc:
         log.exception("payment create failed")
-        await say(query.message, f"Не удалось создать счёт: {exc}")
+        await say(query.message, f"Не удалось создать счёт: {exc}", image="pay")
         return
     await store.save_order(order_id, user.id, user.username, 0, amount, provider, invoice.provider_id, invoice.pay_url)
     await say(
         query.message,
         f"Счёт на {amount} ₽. После оплаты нажмите «Проверить».",
+        image="pay",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
                 [
                     btn("Оплатить", url=invoice.pay_url, emoji="pay", style="success"),
-                    btn("Проверить оплату", callback_data=f"check:{order_id}", emoji="pay", style="primary"),
+                    btn("Проверить", callback_data=f"check:{order_id}", emoji="pay", style="primary"),
                 ],
             ]
         ),
@@ -501,14 +498,14 @@ async def check_payment(query: CallbackQuery) -> None:
     try:
         paid = await pays.is_paid(order["provider"], order["provider_id"])
     except PayError as exc:
-        await say(query.message, f"Провайдер не ответил: {exc}")
+        await say(query.message, f"Провайдер не ответил: {exc}", image="pay")
         return
     if not paid:
-        await say(query.message, "Оплата ещё не дошла. Подождите минуту и нажмите «Проверить» снова.")
+        await say(query.message, "Оплата ещё не дошла. Подождите минуту и нажмите «Проверить» снова.", image="pay")
         return
     await store.mark_order(order["order_id"], "paid")
     balance = await store.add_balance(user.id, int(order["amount_rub"]))
-    await say(query.message, f"Баланс пополнен. Сейчас {balance} ₽.", reply_markup=menu())
+    await say(query.message, f"Баланс пополнен. Сейчас {balance} ₽.", reply_markup=menu(), image="topup")
 
 
 @dp.callback_query(F.data.startswith("buy:"))
@@ -528,13 +525,14 @@ async def buy_plan(query: CallbackQuery) -> None:
             query.message,
             f"Не хватает баланса. Тариф стоит {PLANS[days]} ₽.",
             reply_markup=topup_menu(),
+            image="topup",
         )
         return
     try:
         text, sub_id = await issue(user.id, user.username, days)
     except PanelError as exc:
         await store.add_balance(user.id, PLANS[days])
-        await say(query.message, f"Панель отклонила выдачу, деньги возвращены: {exc}")
+        await say(query.message, f"Панель отклонила выдачу, деньги возвращены: {exc}", image="plans")
         return
     await send_sub(query.message, text, sub_id)
 
@@ -548,7 +546,7 @@ async def my_sub(query: CallbackQuery) -> None:
     await query.answer()
     existing = await live_sub(user.id)
     if not sub_active(existing):
-        await say(query.message, "Подписка не активна. Выберите тариф.", reply_markup=plans_menu())
+        await say(query.message, "Подписка не активна. Выберите тариф.", reply_markup=plans_menu(), image="plans")
         return
     stats = await panel.client_traffic(existing["email"])
     text = format_card(
@@ -570,17 +568,17 @@ async def inbounds(message: Message) -> None:
     try:
         items = await panel.list_inbounds()
     except PanelError as exc:
-        await say(message, f"Ошибка панели: {exc}")
+        await say(message, f"Ошибка панели: {exc}", image="admin")
         return
     if not items:
-        await say(message, "Инбаундов нет.")
+        await say(message, "Инбаундов нет.", image="admin")
         return
     lines = ["Инбаунды:"]
     for item in items:
         lines.append(
             f"`{item.get('id')}` {item.get('protocol')} :{item.get('port')} {item.get('remark') or ''}"
         )
-    await say(message, "\n".join(lines))
+    await say(message, "\n".join(lines), image="admin")
 
 
 @dp.message(Command("revoke"))
@@ -589,19 +587,19 @@ async def revoke(message: Message) -> None:
         return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].isdigit():
-        await say(message, "Использование: /revoke <telegram_id>")
+        await say(message, "Использование: /revoke <telegram_id>", image="admin")
         return
     tg_id = int(parts[1])
     row = await store.get(tg_id)
     if not row:
-        await say(message, "В базе бота такого пользователя нет.")
+        await say(message, "В базе бота такого пользователя нет.", image="admin")
         return
     try:
         await panel.delete_client(row["email"])
     except PanelError as exc:
-        await say(message, f"Панель: {exc}. Запись в боте всё равно удаляю.")
+        await say(message, f"Панель: {exc}. Запись в боте всё равно удаляю.", image="admin")
     await store.delete(tg_id)
-    await say(message, f"Подписка {row['email']} отозвана.")
+    await say(message, f"Подписка {row['email']} отозвана.", image="admin")
 
 
 async def main() -> None:
