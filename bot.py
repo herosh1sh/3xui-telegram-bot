@@ -20,13 +20,14 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
+    ReplyKeyboardMarkup,
 )
 from dotenv import load_dotenv
 
 from admin_panel import admin_reply, register
 from db import Store
 from payments import PayError, Payments
-from ui import btn, say
+from ui import btn, key_btn, say
 from xui import PanelError, XuiPanel, gb_to_bytes
 
 load_dotenv()
@@ -97,18 +98,25 @@ dp = Dispatcher()
 waiting_amount: set[int] = set()
 
 
-def menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                btn("Профиль", callback_data="profile", emoji="profile", style="success"),
-                btn("Подписка", callback_data="my_sub", emoji="sub", style="primary"),
-                btn("Пополнить", callback_data="topup", emoji="topup", style="success"),
-                btn("Помощь", url=SUPPORT_URL, emoji="support"),
-                btn("О нас", callback_data="about", emoji="about"),
-            ]
-        ]
-    )
+def main_keyboard(user_id: int) -> ReplyKeyboardMarkup:
+    rows = [
+        [
+            key_btn("Профиль", emoji="profile", style="success"),
+            key_btn("Подписка", emoji="sub", style="primary"),
+            key_btn("Баланс", emoji="topup", style="success"),
+        ],
+        [
+            key_btn("Помощь", emoji="support"),
+            key_btn("О нас", emoji="about"),
+        ],
+    ]
+    if user_id in ADMIN_IDS:
+        rows.append([key_btn("Админка", emoji="admin", style="danger")])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
+
+
+def menu() -> ReplyKeyboardMarkup:
+    return main_keyboard(0)
 
 
 PLAN_STYLE = {30: "primary", 60: "success", 90: "danger"}
@@ -118,22 +126,28 @@ def plans_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                btn(f"{days}д {price}", callback_data=f"buy:{days}", emoji="plan", style=PLAN_STYLE[days])
+                btn(f"{days} дней", callback_data=f"buy:{days}", emoji="plan", style=PLAN_STYLE[days])
                 for days, price in PLANS.items()
-            ]
-            + [btn("Назад", callback_data="back", emoji="back")]
+            ],
+            [btn("Вернуться", callback_data="back", emoji="back")],
         ]
     )
+
+
+def topup_text() -> str:
+    names = [title for _, title in pays.enabled()]
+    lines = ["Пополнение баланса", "", "Доступные агрегаторы:"]
+    lines += [f"• {name}" for name in names] or ["• нет настроенных агрегаторов"]
+    lines += ["", "Выберите сумму:"]
+    return "\n".join(lines)
 
 
 def topup_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [btn(str(amount), callback_data=f"top:{amount}", emoji="topup") for amount in TOPUP],
-            [
-                btn("Другая", callback_data="top:custom", emoji="topup"),
-                btn("Назад", callback_data="back", emoji="back"),
-            ],
+            [btn(f"{amount} ₽", callback_data=f"top:{amount}", emoji="topup", style="success") for amount in TOPUP],
+            [btn("Другая сумма", callback_data="top:custom", emoji="topup")],
+            [btn("Вернуться", callback_data="back", emoji="back")],
         ]
     )
 
@@ -141,8 +155,8 @@ def topup_menu() -> InlineKeyboardMarkup:
 def pay_menu(amount: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [btn(title, callback_data=f"pay:{code}:{amount}", emoji="pay", style="primary") for code, title in pays.enabled()]
-            + [btn("Назад", callback_data="topup", emoji="back")]
+            [btn(title, callback_data=f"pay:{code}:{amount}", emoji="pay", style="primary") for code, title in pays.enabled()],
+            [btn("Вернуться", callback_data="topup", emoji="back")],
         ]
     )
 
@@ -154,17 +168,15 @@ def about_menu() -> InlineKeyboardMarkup:
                 btn("Политика", url=PRIVACY_URL, emoji="about"),
                 btn("Оферта", url=OFFER_URL, emoji="about"),
                 btn("Канал", url=CHANNEL_URL, emoji="about"),
-                btn("Назад", callback_data="back", emoji="back"),
-            ]
+            ],
+            [btn("Вернуться", callback_data="back", emoji="back")],
         ]
     )
 
 
 def profile_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [btn("Назад", callback_data="back", emoji="back")],
-        ]
+        inline_keyboard=[[btn("Вернуться", callback_data="back", emoji="back")]]
     )
 
 
@@ -187,7 +199,7 @@ def qr_file(url: str) -> BufferedInputFile:
 
 def back_only() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[[btn("Назад", callback_data="back", emoji="back")]]
+        inline_keyboard=[[btn("Вернуться", callback_data="back", emoji="back")]]
     )
 
 
@@ -327,6 +339,78 @@ def sub_active(row: dict | None) -> bool:
     return bool(row and row["expiry_ms"] > int(time.time() * 1000))
 
 
+@dp.message(F.text == "Профиль")
+async def profile_button(message: Message) -> None:
+    user = message.from_user
+    if not user or not allowed(user.id):
+        return
+    account = await store.ensure_user(user.id, user.username)
+    await say(
+        message,
+        "\n".join(
+            [
+                "Профиль",
+                "",
+                f"Баланс: {account['balance']} ₽",
+                f"Telegram ID: `{user.id}`",
+                f"ID в боте: `{account['id']}`",
+            ]
+        ),
+        parse_mode="Markdown",
+        reply_markup=profile_menu(),
+        image="profile",
+    )
+
+
+@dp.message(F.text == "Подписка")
+async def sub_button(message: Message) -> None:
+    user = message.from_user
+    if not user or not allowed(user.id):
+        return
+    existing = await live_sub(user.id)
+    if not sub_active(existing):
+        await say(
+            message,
+            "Подписка не активна. Выберите срок:\n30 дней — 100 ₽\n60 дней — 250 ₽\n90 дней — 500 ₽",
+            reply_markup=plans_menu(),
+            image="plans",
+        )
+        return
+    stats = await panel.client_traffic(existing["email"])
+    text = format_card(
+        existing["email"],
+        existing["sub_id"],
+        existing["expiry_ms"],
+        [],
+        used_up=stats["up"],
+        used_down=stats["down"],
+        traffic_total=stats["total"],
+    )
+    await send_sub(message, text, existing["sub_id"])
+
+
+@dp.message(F.text == "Баланс")
+async def balance_button(message: Message) -> None:
+    user = message.from_user
+    if not user or not allowed(user.id):
+        return
+    await say(message, topup_text(), reply_markup=topup_menu(), image="topup")
+
+
+@dp.message(F.text == "Помощь")
+async def help_button(message: Message) -> None:
+    if not message.from_user or not allowed(message.from_user.id):
+        return
+    await say(message, f"Поддержка: {SUPPORT_URL}", reply_markup=profile_menu(), image="support")
+
+
+@dp.message(F.text == "О нас")
+async def about_button(message: Message) -> None:
+    if not message.from_user or not allowed(message.from_user.id):
+        return
+    await say(message, "О нас", reply_markup=about_menu(), image="about")
+
+
 @dp.message(Command("emoji"))
 async def emoji_ids(message: Message) -> None:
     entities = list(message.entities or []) + list(message.caption_entities or [])
@@ -345,24 +429,41 @@ async def start(message: Message) -> None:
     if not allowed(message.from_user.id):
         await say(message, "Бот доступен только администраторам.", image="menu")
         return
-    await store.ensure_user(message.from_user.id, message.from_user.username)
+    first = not await store.user_exists(message.from_user.id)
+    account = await store.ensure_user(message.from_user.id, message.from_user.username)
+    keyboard = main_keyboard(message.from_user.id)
     payload = message.text.split(maxsplit=1)[1] if message.text and " " in message.text else ""
     if payload == "paycancel":
-        await say(message, "Оплата отменена.", reply_markup=menu(), image="pay")
+        await say(message, "Оплата отменена.", reply_markup=keyboard, image="pay")
         return
     if payload == "paypending":
-        await say(message, "Оплата не завершена.", reply_markup=menu(), image="pay")
+        await say(message, "Оплата не завершена.", reply_markup=keyboard, image="pay")
         return
     if payload == "paysuccess":
-        await say(message, "Оплата прошла.", reply_markup=menu(), image="pay")
+        await say(message, "Оплата прошла.", reply_markup=keyboard, image="pay")
         return
-    await say(message, "HeroshishVPN. Выберите действие.", reply_markup=menu(), image="menu")
+    if first:
+        await say(
+            message,
+            "\n".join(
+                [
+                    "Добро пожаловать в главное меню!",
+                    f"Канал: {CHANNEL_URL}",
+                    "",
+                    f"ID в боте: {account['id']}",
+                ]
+            ),
+            reply_markup=keyboard,
+            image="menu",
+        )
+        return
+    await say(message, "Главное меню.", reply_markup=keyboard, image="menu")
 
 
 @dp.callback_query(F.data == "back")
 async def back(query: CallbackQuery) -> None:
     await query.answer()
-    await say(query.message, "Главное меню.", reply_markup=menu(), image="menu")
+    await say(query.message, "Главное меню.", image="menu")
 
 
 @dp.callback_query(F.data == "about")
@@ -402,7 +503,7 @@ async def plans(query: CallbackQuery) -> None:
         await query.answer("Нет доступа", show_alert=True)
         return
     await query.answer()
-    await say(query.message, "Тарифы списываются с баланса.", reply_markup=plans_menu(), image="plans")
+    await say(query.message, "Выберите срок из предложенных вариантов:\n30 дней — 100 ₽\n60 дней — 250 ₽\n90 дней — 500 ₽", reply_markup=plans_menu(), image="plans")
 
 
 @dp.callback_query(F.data == "topup")
@@ -411,7 +512,7 @@ async def topup(query: CallbackQuery) -> None:
         await query.answer("Нет доступа", show_alert=True)
         return
     await query.answer()
-    await say(query.message, "Сумма пополнения:", reply_markup=topup_menu(), image="topup")
+    await say(query.message, topup_text(), reply_markup=topup_menu(), image="topup")
 
 
 @dp.callback_query(F.data.startswith("top:"))
@@ -505,7 +606,7 @@ async def check_payment(query: CallbackQuery) -> None:
         return
     await store.mark_order(order["order_id"], "paid")
     balance = await store.add_balance(user.id, int(order["amount_rub"]))
-    await say(query.message, f"Баланс пополнен. Сейчас {balance} ₽.", reply_markup=menu(), image="topup")
+    await say(query.message, f"Баланс пополнен. Сейчас {balance} ₽.", image="topup")
 
 
 @dp.callback_query(F.data.startswith("buy:"))
@@ -546,7 +647,7 @@ async def my_sub(query: CallbackQuery) -> None:
     await query.answer()
     existing = await live_sub(user.id)
     if not sub_active(existing):
-        await say(query.message, "Подписка не активна. Выберите тариф.", reply_markup=plans_menu(), image="plans")
+        await say(query.message, "Подписка не активна. Выберите срок:\n30 дней — 100 ₽\n60 дней — 250 ₽\n90 дней — 500 ₽", reply_markup=plans_menu(), image="plans")
         return
     stats = await panel.client_traffic(existing["email"])
     text = format_card(
