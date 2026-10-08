@@ -32,6 +32,7 @@ log = logging.getLogger("bot")
 
 PLANS = {30: 100, 60: 250, 90: 500}
 TOPUP = (100, 250, 500, 1000)
+MAX_TOPUP = 100000
 PRIVACY_URL = "https://telegra.ph/Politika-konfidencialnosti-HeroshishVPN-10-08"
 OFFER_URL = "https://telegra.ph/Publichnaya-oferta-na-uslugi-HeroshishVPN-10-08"
 CHANNEL_URL = "https://t.me/Heroshish"
@@ -90,6 +91,7 @@ pays = Payments(
 )
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
+waiting_amount: set[int] = set()
 
 
 def menu() -> InlineKeyboardMarkup:
@@ -114,18 +116,24 @@ def plans_menu() -> InlineKeyboardMarkup:
 
 
 def topup_menu() -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text=f"{amount} ₽", callback_data=f"top:{amount}")] for amount in TOPUP]
-    rows.append([InlineKeyboardButton(text="Назад", callback_data="back")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=f"{amount} ₽", callback_data=f"top:{amount}") for amount in TOPUP],
+            [
+                InlineKeyboardButton(text="Другая сумма", callback_data="top:custom"),
+                InlineKeyboardButton(text="Назад", callback_data="back"),
+            ],
+        ]
+    )
 
 
 def pay_menu(amount: int) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text=title, callback_data=f"pay:{code}:{amount}")]
-        for code, title in pays.enabled()
-    ]
-    rows.append([InlineKeyboardButton(text="Назад", callback_data="topup")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=title, callback_data=f"pay:{code}:{amount}") for code, title in pays.enabled()],
+            [InlineKeyboardButton(text="Назад", callback_data="topup")],
+        ]
+    )
 
 
 def about_menu() -> InlineKeyboardMarkup:
@@ -306,12 +314,31 @@ async def choose_topup(query: CallbackQuery) -> None:
     if not query.from_user or not allowed(query.from_user.id):
         await query.answer("Нет доступа", show_alert=True)
         return
-    amount = int(query.data.split(":")[1])
-    if amount not in TOPUP or not pays.enabled():
+    amount_raw = query.data.split(":", 1)[1]
+    if amount_raw == "custom":
+        waiting_amount.add(query.from_user.id)
+        await query.answer()
+        await query.message.answer("Введите сумму в рублях целым числом.")
+        return
+    amount = int(amount_raw)
+    if amount < 1 or amount > MAX_TOPUP or not pays.enabled():
         await query.answer("Пополнение недоступно", show_alert=True)
         return
     await query.answer()
     await query.message.answer(f"Пополнение на {amount} ₽. Выберите способ.", reply_markup=pay_menu(amount))
+
+
+@dp.message(F.text.regexp(r"^\d+$"))
+async def custom_amount(message: Message) -> None:
+    user = message.from_user
+    if not user or user.id not in waiting_amount:
+        return
+    waiting_amount.discard(user.id)
+    amount = int(message.text or "0")
+    if amount < 1 or amount > MAX_TOPUP:
+        await message.answer(f"Сумма от 1 до {MAX_TOPUP} ₽.", reply_markup=topup_menu())
+        return
+    await message.answer(f"Пополнение на {amount} ₽. Выберите способ.", reply_markup=pay_menu(amount))
 
 
 @dp.callback_query(F.data.startswith("pay:"))
@@ -322,7 +349,7 @@ async def create_payment(query: CallbackQuery) -> None:
         return
     _, provider, amount_raw = query.data.split(":")
     amount = int(amount_raw)
-    if amount not in TOPUP or provider not in {code for code, _ in pays.enabled()}:
+    if amount < 1 or amount > MAX_TOPUP or provider not in {code for code, _ in pays.enabled()}:
         await query.answer("Недоступно", show_alert=True)
         return
     await query.answer()
@@ -339,8 +366,10 @@ async def create_payment(query: CallbackQuery) -> None:
         f"Счёт на {amount} ₽. После оплаты нажмите «Проверить».",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="Оплатить", url=invoice.pay_url)],
-                [InlineKeyboardButton(text="Проверить оплату", callback_data=f"check:{order_id}")],
+                [
+                    InlineKeyboardButton(text="Оплатить", url=invoice.pay_url),
+                    InlineKeyboardButton(text="Проверить оплату", callback_data=f"check:{order_id}"),
+                ],
             ]
         ),
     )
