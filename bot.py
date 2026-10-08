@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import os
 import secrets
 import time
 from pathlib import Path
 
+import qrcode
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
+    BufferedInputFile,
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -28,6 +31,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("bot")
 
 PLANS = {30: 100, 60: 250, 90: 500}
+TOPUP = (100, 250, 500, 1000)
+PRIVACY_URL = "https://telegra.ph/Politika-konfidencialnosti-HeroshishVPN-10-08"
+OFFER_URL = "https://telegra.ph/Publichnaya-oferta-na-uslugi-HeroshishVPN-10-08"
+CHANNEL_URL = "https://t.me/Heroshish"
 
 
 def env(name: str, default: str = "") -> str:
@@ -56,6 +63,7 @@ MAX_CLIENTS = int(env("MAX_CLIENTS", "0") or 0)
 ADMIN_IDS = {int(x) for x in env("ADMIN_IDS").split(",") if x.strip()}
 DB_PATH = env("DB_PATH", "data/subs.sqlite")
 VERIFY_SSL = env_bool("VERIFY_SSL", True)
+SUPPORT_URL = env("SUPPORT_URL", CHANNEL_URL)
 
 if not BOT_TOKEN or not PANEL_URL or not SUB_BASE_URL:
     raise SystemExit("Заполните BOT_TOKEN, PANEL_URL и SUB_BASE_URL в .env")
@@ -85,21 +93,59 @@ dp = Dispatcher()
 
 
 def menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Профиль", callback_data="profile")],
+            [InlineKeyboardButton(text="Купить VPN", callback_data="plans")],
+            [InlineKeyboardButton(text="Пополнить баланс", callback_data="topup")],
+            [InlineKeyboardButton(text="Поддержка", url=SUPPORT_URL)],
+            [InlineKeyboardButton(text="О нас", callback_data="about")],
+        ]
+    )
+
+
+def plans_menu() -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=f"{days} дней — {price} ₽", callback_data=f"plan:{days}")]
+        [InlineKeyboardButton(text=f"{days} дней — {price} ₽", callback_data=f"buy:{days}")]
         for days, price in PLANS.items()
-    ]
-    rows.append([InlineKeyboardButton(text="Моя подписка", callback_data="my_sub")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def pay_menu(days: int) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text=title, callback_data=f"pay:{code}:{days}")]
-        for code, title in pays.enabled()
     ]
     rows.append([InlineKeyboardButton(text="Назад", callback_data="back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def topup_menu() -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text=f"{amount} ₽", callback_data=f"top:{amount}")] for amount in TOPUP]
+    rows.append([InlineKeyboardButton(text="Назад", callback_data="back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def pay_menu(amount: int) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=title, callback_data=f"pay:{code}:{amount}")]
+        for code, title in pays.enabled()
+    ]
+    rows.append([InlineKeyboardButton(text="Назад", callback_data="topup")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def about_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Политика конфиденциальности", url=PRIVACY_URL)],
+            [InlineKeyboardButton(text="Оферта", url=OFFER_URL)],
+            [InlineKeyboardButton(text="Канал", url=CHANNEL_URL)],
+            [InlineKeyboardButton(text="Назад", callback_data="back")],
+        ]
+    )
+
+
+def profile_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Моя подписка", callback_data="my_sub")],
+            [InlineKeyboardButton(text="Назад", callback_data="back")],
+        ]
+    )
 
 
 def allowed(user_id: int) -> bool:
@@ -110,6 +156,22 @@ def allowed(user_id: int) -> bool:
 
 def sub_url(sub_id: str) -> str:
     return f"{SUB_BASE_URL}/{sub_id}"
+
+
+def qr_file(url: str) -> BufferedInputFile:
+    image = qrcode.make(url)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return BufferedInputFile(buffer.getvalue(), filename="subscription.png")
+
+
+async def send_sub(message: Message, text: str, sub_id: str) -> None:
+    await message.answer_photo(
+        qr_file(sub_url(sub_id)),
+        caption=text,
+        parse_mode="Markdown",
+        reply_markup=menu(),
+    )
 
 
 def format_card(email: str, sub_id: str, expiry_ms: int, links: list[str]) -> str:
@@ -136,11 +198,11 @@ def format_card(email: str, sub_id: str, expiry_ms: int, links: list[str]) -> st
         lines.append("Прямые ссылки:")
         lines.extend(f"`{link}`" for link in links[:5])
     lines.append("")
-    lines.append("Вставьте ссылку подписки в v2rayNG, Hiddify, Streisand или Nekobox.")
+    lines.append("Отсканируйте QR или вставьте ссылку в v2rayNG, Hiddify, Streisand или Nekobox.")
     return "\n".join(lines)
 
 
-async def issue(tg_id: int, username: str | None, days: int) -> str:
+async def issue(tg_id: int, username: str | None, days: int) -> tuple[str, str]:
     email = f"tg{tg_id}"
     existing = await store.get(tg_id)
     now_ms = int(time.time() * 1000)
@@ -168,7 +230,11 @@ async def issue(tg_id: int, username: str | None, days: int) -> str:
             sub_id = str(created["subId"])
     await store.save(tg_id, username, email, sub_id, expiry_ms)
     links = await panel.client_links(email)
-    return format_card(email, sub_id, expiry_ms, links)
+    return format_card(email, sub_id, expiry_ms, links), sub_id
+
+
+def sub_active(row: dict | None) -> bool:
+    return bool(row and row["expiry_ms"] > int(time.time() * 1000))
 
 
 @dp.message(CommandStart())
@@ -176,38 +242,76 @@ async def start(message: Message) -> None:
     if not message.from_user:
         return
     if not allowed(message.from_user.id):
-        await message.answer("Выдача закрыта. Бот доступен только администраторам.")
+        await message.answer("Бот доступен только администраторам.")
         return
-    await message.answer(
-        "Выберите срок. Оплата проверяется кнопкой, подписка выдаётся только после статуса «оплачено».",
-        reply_markup=menu(),
-    )
+    await store.ensure_user(message.from_user.id, message.from_user.username)
+    await message.answer("HeroshishVPN. Выберите действие.", reply_markup=menu())
 
 
 @dp.callback_query(F.data == "back")
 async def back(query: CallbackQuery) -> None:
     await query.answer()
-    await query.message.answer("Выберите срок.", reply_markup=menu())
+    await query.message.answer("Главное меню.", reply_markup=menu())
 
 
-@dp.callback_query(F.data.startswith("plan:"))
-async def choose_plan(query: CallbackQuery) -> None:
+@dp.callback_query(F.data == "about")
+async def about(query: CallbackQuery) -> None:
+    await query.answer()
+    await query.message.answer("О нас", reply_markup=about_menu())
+
+
+@dp.callback_query(F.data == "profile")
+async def profile(query: CallbackQuery) -> None:
     user = query.from_user
     if not user or not allowed(user.id):
         await query.answer("Нет доступа", show_alert=True)
         return
-    days = int(query.data.split(":")[1])
-    if days not in PLANS:
-        await query.answer("Нет такого плана", show_alert=True)
-        return
-    if not pays.enabled():
-        await query.answer("Оплата не настроена", show_alert=True)
+    await query.answer()
+    account = await store.ensure_user(user.id, user.username)
+    await query.message.answer(
+        "\n".join(
+            [
+                "Профиль",
+                "",
+                f"Баланс: {account['balance']} ₽",
+                f"Telegram ID: `{user.id}`",
+                f"ID в боте: `{account['id']}`",
+            ]
+        ),
+        parse_mode="Markdown",
+        reply_markup=profile_menu(),
+    )
+
+
+@dp.callback_query(F.data == "plans")
+async def plans(query: CallbackQuery) -> None:
+    if not query.from_user or not allowed(query.from_user.id):
+        await query.answer("Нет доступа", show_alert=True)
         return
     await query.answer()
-    await query.message.answer(
-        f"{days} дней — {PLANS[days]} ₽. Выберите способ оплаты.",
-        reply_markup=pay_menu(days),
-    )
+    await query.message.answer("Тарифы списываются с баланса.", reply_markup=plans_menu())
+
+
+@dp.callback_query(F.data == "topup")
+async def topup(query: CallbackQuery) -> None:
+    if not query.from_user or not allowed(query.from_user.id):
+        await query.answer("Нет доступа", show_alert=True)
+        return
+    await query.answer()
+    await query.message.answer("Сумма пополнения:", reply_markup=topup_menu())
+
+
+@dp.callback_query(F.data.startswith("top:"))
+async def choose_topup(query: CallbackQuery) -> None:
+    if not query.from_user or not allowed(query.from_user.id):
+        await query.answer("Нет доступа", show_alert=True)
+        return
+    amount = int(query.data.split(":")[1])
+    if amount not in TOPUP or not pays.enabled():
+        await query.answer("Пополнение недоступно", show_alert=True)
+        return
+    await query.answer()
+    await query.message.answer(f"Пополнение на {amount} ₽. Выберите способ.", reply_markup=pay_menu(amount))
 
 
 @dp.callback_query(F.data.startswith("pay:"))
@@ -216,22 +320,23 @@ async def create_payment(query: CallbackQuery) -> None:
     if not user or not allowed(user.id):
         await query.answer("Нет доступа", show_alert=True)
         return
-    _, provider, days_raw = query.data.split(":")
-    days = int(days_raw)
-    if days not in PLANS or provider not in {code for code, _ in pays.enabled()}:
+    _, provider, amount_raw = query.data.split(":")
+    amount = int(amount_raw)
+    if amount not in TOPUP or provider not in {code for code, _ in pays.enabled()}:
         await query.answer("Недоступно", show_alert=True)
         return
     await query.answer()
+    await store.ensure_user(user.id, user.username)
     order_id = secrets.token_hex(8)
     try:
-        invoice = await pays.create(provider, order_id, PLANS[days], days)
+        invoice = await pays.create(provider, order_id, amount, 0)
     except (PayError, Exception) as exc:
         log.exception("payment create failed")
         await query.message.answer(f"Не удалось создать счёт: {exc}")
         return
-    await store.save_order(order_id, user.id, user.username, days, PLANS[days], provider, invoice.provider_id, invoice.pay_url)
+    await store.save_order(order_id, user.id, user.username, 0, amount, provider, invoice.provider_id, invoice.pay_url)
     await query.message.answer(
-        f"Счёт на {PLANS[days]} ₽, {days} дней. После оплаты нажмите «Проверить».",
+        f"Счёт на {amount} ₽. После оплаты нажмите «Проверить».",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="Оплатить", url=invoice.pay_url)],
@@ -251,14 +356,7 @@ async def check_payment(query: CallbackQuery) -> None:
         await query.answer("Счёт не найден", show_alert=True)
         return
     if order["status"] == "paid":
-        await query.answer("Уже выдано")
-        existing = await store.get(user.id)
-        if existing:
-            links = await panel.client_links(existing["email"])
-            await query.message.answer(
-                format_card(existing["email"], existing["sub_id"], existing["expiry_ms"], links),
-                parse_mode="Markdown",
-            )
+        await query.answer("Уже зачислено", show_alert=True)
         return
     await query.answer("Проверяю…")
     try:
@@ -270,30 +368,51 @@ async def check_payment(query: CallbackQuery) -> None:
         await query.message.answer("Оплата ещё не дошла. Подождите минуту и нажмите «Проверить» снова.")
         return
     await store.mark_order(order["order_id"], "paid")
-    try:
-        text = await issue(user.id, user.username, int(order["days"]))
-    except PanelError as exc:
-        await query.message.answer(f"Оплата прошла, но панель отклонила выдачу: {exc}")
+    balance = await store.add_balance(user.id, int(order["amount_rub"]))
+    await query.message.answer(f"Баланс пополнен. Сейчас {balance} ₽.", reply_markup=menu())
+
+
+@dp.callback_query(F.data.startswith("buy:"))
+async def buy_plan(query: CallbackQuery) -> None:
+    user = query.from_user
+    if not user or not allowed(user.id):
+        await query.answer("Нет доступа", show_alert=True)
         return
-    await query.message.answer(text, parse_mode="Markdown", reply_markup=menu())
+    days = int(query.data.split(":")[1])
+    if days not in PLANS:
+        await query.answer("Нет такого тарифа", show_alert=True)
+        return
+    await query.answer()
+    await store.ensure_user(user.id, user.username)
+    if not await store.spend_balance(user.id, PLANS[days]):
+        await query.message.answer(
+            f"Не хватает баланса. Тариф стоит {PLANS[days]} ₽.",
+            reply_markup=topup_menu(),
+        )
+        return
+    try:
+        text, sub_id = await issue(user.id, user.username, days)
+    except PanelError as exc:
+        await store.add_balance(user.id, PLANS[days])
+        await query.message.answer(f"Панель отклонила выдачу, деньги возвращены: {exc}")
+        return
+    await send_sub(query.message, text, sub_id)
 
 
 @dp.callback_query(F.data == "my_sub")
-async def on_button(query: CallbackQuery) -> None:
+async def my_sub(query: CallbackQuery) -> None:
     user = query.from_user
-    if not user:
-        return
-    if not allowed(user.id):
+    if not user or not allowed(user.id):
         await query.answer("Нет доступа", show_alert=True)
         return
     await query.answer()
     existing = await store.get(user.id)
-    if not existing:
-        await query.message.answer("Подписки ещё нет. Выберите срок.", reply_markup=menu())
+    if not sub_active(existing):
+        await query.message.answer("Подписка не активна. Выберите тариф.", reply_markup=plans_menu())
         return
     links = await panel.client_links(existing["email"])
     text = format_card(existing["email"], existing["sub_id"], existing["expiry_ms"], links)
-    await query.message.answer(text, parse_mode="Markdown", reply_markup=menu())
+    await send_sub(query.message, text, existing["sub_id"])
 
 
 @dp.message(Command("inbounds"))
