@@ -1,4 +1,4 @@
-"""Telegram-бот: кнопка выдаёт подписку 3x-ui без оплаты."""
+"""Telegram-бот: планы 30/60/90 дней и оплата через ЮKassa, Crypto Pay или 2328."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import secrets
+import time
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
@@ -19,11 +20,14 @@ from aiogram.types import (
 from dotenv import load_dotenv
 
 from db import Store
-from xui import PanelError, XuiPanel, expiry_from_days, gb_to_bytes
+from payments import PayError, Payments
+from xui import PanelError, XuiPanel, gb_to_bytes
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("bot")
+
+PLANS = {30: 100, 60: 250, 90: 500}
 
 
 def env(name: str, default: str = "") -> str:
@@ -66,17 +70,36 @@ panel = XuiPanel(
     api_token=API_TOKEN,
     verify_ssl=VERIFY_SSL,
 )
+pays = Payments(
+    yookassa_shop_id=env("YOOKASSA_SHOP_ID"),
+    yookassa_secret=env("YOOKASSA_SECRET_KEY"),
+    yookassa_return_url=env("YOOKASSA_RETURN_URL"),
+    cryptopay_token=env("CRYPTOPAY_TOKEN"),
+    cryptopay_testnet=env_bool("CRYPTOPAY_TESTNET"),
+    io_project=env("IO2328_PROJECT"),
+    io_api_key=env("IO2328_API_KEY"),
+    io_return_url=env("IO2328_RETURN_URL"),
+)
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
 
 
 def menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Получить подписку", callback_data="get_sub")],
-            [InlineKeyboardButton(text="Моя подписка", callback_data="my_sub")],
-        ]
-    )
+    rows = [
+        [InlineKeyboardButton(text=f"{days} дней — {price} ₽", callback_data=f"plan:{days}")]
+        for days, price in PLANS.items()
+    ]
+    rows.append([InlineKeyboardButton(text="Моя подписка", callback_data="my_sub")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def pay_menu(days: int) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=title, callback_data=f"pay:{code}:{days}")]
+        for code, title in pays.enabled()
+    ]
+    rows.append([InlineKeyboardButton(text="Назад", callback_data="back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def allowed(user_id: int) -> bool:
@@ -117,32 +140,32 @@ def format_card(email: str, sub_id: str, expiry_ms: int, links: list[str]) -> st
     return "\n".join(lines)
 
 
-async def issue(tg_id: int, username: str | None) -> str:
-    existing = await store.get(tg_id)
-    if existing and ONE_PER_USER:
-        links = await panel.client_links(existing["email"])
-        return format_card(existing["email"], existing["sub_id"], existing["expiry_ms"], links)
-
-    if MAX_CLIENTS > 0 and await store.count() >= MAX_CLIENTS and tg_id not in ADMIN_IDS:
-        return "Лимит бесплатных подписок исчерпан. Напишите администратору."
-
+async def issue(tg_id: int, username: str | None, days: int) -> str:
     email = f"tg{tg_id}"
-    sub_id = secrets.token_hex(8)
-    expiry_ms = expiry_from_days(DAYS)
-    await panel.add_client(
-        email=email,
-        inbound_ids=INBOUND_IDS,
-        tg_id=tg_id,
-        sub_id=sub_id,
-        total_bytes=gb_to_bytes(TRAFFIC_GB),
-        expiry_ms=expiry_ms,
-        limit_ip=LIMIT_IP,
-        flow=FLOW,
-        comment=f"telegram:{username or tg_id}",
-    )
-    created = await panel.get_client(email)
-    if created and created.get("subId"):
-        sub_id = str(created["subId"])
+    existing = await store.get(tg_id)
+    now_ms = int(time.time() * 1000)
+    base = existing["expiry_ms"] if existing and existing["expiry_ms"] > now_ms else now_ms
+    expiry_ms = base + days * 86400 * 1000
+    total_bytes = gb_to_bytes(TRAFFIC_GB)
+    if existing:
+        await panel.extend_client(email, expiry_ms, total_bytes)
+        sub_id = existing["sub_id"]
+    else:
+        sub_id = secrets.token_hex(8)
+        await panel.add_client(
+            email=email,
+            inbound_ids=INBOUND_IDS,
+            tg_id=tg_id,
+            sub_id=sub_id,
+            total_bytes=total_bytes,
+            expiry_ms=expiry_ms,
+            limit_ip=LIMIT_IP,
+            flow=FLOW,
+            comment=f"telegram:{username or tg_id}",
+        )
+        created = await panel.get_client(email)
+        if created and created.get("subId"):
+            sub_id = str(created["subId"])
     await store.save(tg_id, username, email, sub_id, expiry_ms)
     links = await panel.client_links(email)
     return format_card(email, sub_id, expiry_ms, links)
@@ -156,12 +179,106 @@ async def start(message: Message) -> None:
         await message.answer("Выдача закрыта. Бот доступен только администраторам.")
         return
     await message.answer(
-        "Бесплатная выдача подписки.\nНажмите кнопку — бот создаст клиента в панели и пришлёт ссылку.",
+        "Выберите срок. Оплата проверяется кнопкой, подписка выдаётся только после статуса «оплачено».",
         reply_markup=menu(),
     )
 
 
-@dp.callback_query(F.data.in_({"get_sub", "my_sub"}))
+@dp.callback_query(F.data == "back")
+async def back(query: CallbackQuery) -> None:
+    await query.answer()
+    await query.message.answer("Выберите срок.", reply_markup=menu())
+
+
+@dp.callback_query(F.data.startswith("plan:"))
+async def choose_plan(query: CallbackQuery) -> None:
+    user = query.from_user
+    if not user or not allowed(user.id):
+        await query.answer("Нет доступа", show_alert=True)
+        return
+    days = int(query.data.split(":")[1])
+    if days not in PLANS:
+        await query.answer("Нет такого плана", show_alert=True)
+        return
+    if not pays.enabled():
+        await query.answer("Оплата не настроена", show_alert=True)
+        return
+    await query.answer()
+    await query.message.answer(
+        f"{days} дней — {PLANS[days]} ₽. Выберите способ оплаты.",
+        reply_markup=pay_menu(days),
+    )
+
+
+@dp.callback_query(F.data.startswith("pay:"))
+async def create_payment(query: CallbackQuery) -> None:
+    user = query.from_user
+    if not user or not allowed(user.id):
+        await query.answer("Нет доступа", show_alert=True)
+        return
+    _, provider, days_raw = query.data.split(":")
+    days = int(days_raw)
+    if days not in PLANS or provider not in {code for code, _ in pays.enabled()}:
+        await query.answer("Недоступно", show_alert=True)
+        return
+    await query.answer()
+    order_id = secrets.token_hex(8)
+    try:
+        invoice = await pays.create(provider, order_id, PLANS[days], days)
+    except (PayError, Exception) as exc:
+        log.exception("payment create failed")
+        await query.message.answer(f"Не удалось создать счёт: {exc}")
+        return
+    await store.save_order(order_id, user.id, user.username, days, PLANS[days], provider, invoice.provider_id, invoice.pay_url)
+    await query.message.answer(
+        f"Счёт на {PLANS[days]} ₽, {days} дней. После оплаты нажмите «Проверить».",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Оплатить", url=invoice.pay_url)],
+                [InlineKeyboardButton(text="Проверить оплату", callback_data=f"check:{order_id}")],
+            ]
+        ),
+    )
+
+
+@dp.callback_query(F.data.startswith("check:"))
+async def check_payment(query: CallbackQuery) -> None:
+    user = query.from_user
+    if not user:
+        return
+    order = await store.get_order(query.data.split(":", 1)[1])
+    if not order or order["tg_id"] != user.id:
+        await query.answer("Счёт не найден", show_alert=True)
+        return
+    if order["status"] == "paid":
+        await query.answer("Уже выдано")
+        existing = await store.get(user.id)
+        if existing:
+            links = await panel.client_links(existing["email"])
+            await query.message.answer(
+                format_card(existing["email"], existing["sub_id"], existing["expiry_ms"], links),
+                parse_mode="Markdown",
+            )
+        return
+    await query.answer("Проверяю…")
+    try:
+        paid = await pays.is_paid(order["provider"], order["provider_id"])
+    except PayError as exc:
+        await query.message.answer(f"Провайдер не ответил: {exc}")
+        return
+    if not paid:
+        await query.message.answer("Оплата ещё не дошла. Подождите минуту и нажмите «Проверить» снова.")
+        return
+    await store.mark_order(order["order_id"], "paid")
+    try:
+        text = await issue(user.id, user.username, int(order["days"]))
+    except PanelError as exc:
+        await query.message.answer(f"Оплата прошла, но панель отклонила выдачу: {exc}")
+        return
+    await query.message.answer(text, parse_mode="Markdown", reply_markup=menu())
+
+
+@dp.callback_query(F.data == "my_sub")
 async def on_button(query: CallbackQuery) -> None:
     user = query.from_user
     if not user:
@@ -170,24 +287,12 @@ async def on_button(query: CallbackQuery) -> None:
         await query.answer("Нет доступа", show_alert=True)
         return
     await query.answer()
-    if query.data == "my_sub":
-        existing = await store.get(user.id)
-        if not existing:
-            await query.message.answer("Подписки ещё нет. Нажмите «Получить подписку».", reply_markup=menu())
-            return
-        links = await panel.client_links(existing["email"])
-        text = format_card(existing["email"], existing["sub_id"], existing["expiry_ms"], links)
-    else:
-        try:
-            text = await issue(user.id, user.username)
-        except PanelError as exc:
-            log.exception("panel error")
-            await query.message.answer(f"Панель отклонила запрос: {exc}")
-            return
-        except Exception as exc:
-            log.exception("issue failed")
-            await query.message.answer(f"Не получилось выдать подписку: {exc}")
-            return
+    existing = await store.get(user.id)
+    if not existing:
+        await query.message.answer("Подписки ещё нет. Выберите срок.", reply_markup=menu())
+        return
+    links = await panel.client_links(existing["email"])
+    text = format_card(existing["email"], existing["sub_id"], existing["expiry_ms"], links)
     await query.message.answer(text, parse_mode="Markdown", reply_markup=menu())
 
 
@@ -240,6 +345,7 @@ async def main() -> None:
         await dp.start_polling(bot)
     finally:
         await panel.close()
+        await pays.close()
         await bot.session.close()
 
 
