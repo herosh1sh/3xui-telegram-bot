@@ -103,7 +103,7 @@ def menu() -> InlineKeyboardMarkup:
             [
                 btn("Профиль", callback_data="profile", emoji="profile", style="success"),
                 btn("Подписка", callback_data="my_sub", emoji="sub", style="primary"),
-                btn("Баланс", callback_data="topup", emoji="topup", style="success"),
+                btn("Пополнить", callback_data="topup", emoji="topup", style="success"),
                 btn("Помощь", url=SUPPORT_URL, emoji="support"),
                 btn("О нас", callback_data="about", emoji="about"),
             ]
