@@ -285,7 +285,6 @@ def format_card(
         f"Осталось: {days_left(expiry_ms)}",
         f"Окончание: {until}",
         f"Трафик: {format_bytes(used)} из {limit}",
-        f"Email в панели: `{email}`",
         "",
         "Ссылка подписки:",
         f"`{sub_url(sub_id)}`",
