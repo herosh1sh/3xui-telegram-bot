@@ -180,6 +180,19 @@ def profile_menu() -> InlineKeyboardMarkup:
     )
 
 
+
+def invoice_menu(pay_url: str, order_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                btn("Оплатить", url=pay_url, emoji="pay", style="success"),
+                btn("Проверить", callback_data=f"check:{order_id}", emoji="pay", style="primary"),
+            ],
+            [btn("Отмена оплаты", callback_data=f"cancelpay:{order_id}", emoji="back", style="danger")],
+        ]
+    )
+
+
 def allowed(user_id: int) -> bool:
     if user_id in ADMIN_IDS:
         return True
@@ -572,15 +585,26 @@ async def create_payment(query: CallbackQuery) -> None:
         query.message,
         f"Счёт на {amount} ₽. После оплаты нажмите «Проверить».",
         image="pay",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    btn("Оплатить", url=invoice.pay_url, emoji="pay", style="success"),
-                    btn("Проверить", callback_data=f"check:{order_id}", emoji="pay", style="primary"),
-                ],
-            ]
-        ),
+        reply_markup=invoice_menu(invoice.pay_url, order_id),
     )
+
+
+
+@dp.callback_query(F.data.startswith("cancelpay:"))
+async def cancel_payment(query: CallbackQuery) -> None:
+    user = query.from_user
+    if not user:
+        return
+    order = await store.get_order(query.data.split(":", 1)[1])
+    if not order or order["tg_id"] != user.id:
+        await query.answer("Счёт не найден", show_alert=True)
+        return
+    if order["status"] == "paid":
+        await query.answer("Оплата уже зачислена", show_alert=True)
+        return
+    await store.mark_order(order["order_id"], "canceled")
+    await query.answer("Оплата отменена")
+    await say(query.message, "Оплата отменена. Деньги не списаны, баланс не изменился.", image="pay")
 
 
 @dp.callback_query(F.data.startswith("check:"))
@@ -602,7 +626,12 @@ async def check_payment(query: CallbackQuery) -> None:
         await say(query.message, f"Провайдер не ответил: {exc}", image="pay")
         return
     if not paid:
-        await say(query.message, "Оплата ещё не дошла. Подождите минуту и нажмите «Проверить» снова.", image="pay")
+        await say(
+            query.message,
+            "Оплата ещё не дошла. Подождите минуту и нажмите «Проверить» снова.",
+            image="pay",
+            reply_markup=invoice_menu(order["pay_url"], order["order_id"]),
+        )
         return
     await store.mark_order(order["order_id"], "paid")
     balance = await store.add_balance(user.id, int(order["amount_rub"]))
