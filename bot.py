@@ -348,7 +348,7 @@ async def start(message: Message) -> None:
         return
     await say(message, "HeroshishVPN. Выберите действие.", reply_markup=menu())
     if message.from_user.id in ADMIN_IDS:
-        await say(message, "Админ-кнопка внизу экрана.", reply_markup=admin_reply())
+        await message.answer("\u2060", reply_markup=admin_reply())
 
 
 @dp.callback_query(F.data == "back")
