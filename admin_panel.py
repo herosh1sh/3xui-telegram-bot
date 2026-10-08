@@ -8,6 +8,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from xui import PanelError
 
+MAX_DAYS = 3650
+
 
 def admin_reply() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
@@ -28,6 +30,14 @@ def admin_menu() -> InlineKeyboardMarkup:
     )
 
 
+def days_menu(prefix: str, tg_id: int | None = None) -> InlineKeyboardMarkup:
+    rows = []
+    for days in (30, 60, 90):
+        data = f"{prefix}:{days}" if tg_id is None else f"{prefix}:{tg_id}:{days}"
+        rows.append([InlineKeyboardButton(text=f"{days} дней", callback_data=data)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 class WaitingAdmin(BaseFilter):
     def __init__(self, waiting: dict[int, dict]) -> None:
         self.waiting = waiting
@@ -42,6 +52,24 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
 
     def allowed(user_id: int) -> bool:
         return user_id in admin_ids
+
+    async def give(message: Message, tg_id: int, username: str | None, days: int) -> None:
+        if days < 1 or days > MAX_DAYS:
+            await message.answer(f"Срок от 1 до {MAX_DAYS} дней.", reply_markup=admin_menu())
+            return
+        await store.ensure_user(tg_id, username)
+        try:
+            text, sub_id = await issue(tg_id, username, days)
+        except PanelError as exc:
+            await message.answer(f"Панель отклонила выдачу: {exc}")
+            return
+        await message.answer(f"Подписка на {days} дн. выдана {tg_id}.")
+        await send_sub(message, text, sub_id)
+        if username is None:
+            try:
+                await bot.send_message(tg_id, f"Вам выдана подписка на {days} дн. Откройте «Моя подписка».")
+            except Exception:
+                pass
 
     @dp.message(F.text == "Админка")
     async def open_admin(message: Message) -> None:
@@ -69,7 +97,7 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
             return
         waiting[user.id] = {"mode": "sub"}
         await query.answer()
-        await query.message.answer("Введите Telegram ID пользователя. Потом выберите срок.")
+        await query.message.answer("Введите Telegram ID пользователя. Потом введите срок в днях.")
 
     @dp.callback_query(F.data == "adm:selfbal")
     async def ask_self_balance(query: CallbackQuery) -> None:
@@ -87,9 +115,12 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
         if not user or not allowed(user.id):
             await query.answer("Нет доступа", show_alert=True)
             return
+        waiting[user.id] = {"mode": "selfsub"}
         await query.answer()
-        rows = [[InlineKeyboardButton(text=f"{days} дней", callback_data=f"adm:self:{days}")] for days in plans]
-        await query.message.answer("Выдать себе подписку без списания:", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+        await query.message.answer(
+            "Введите срок в днях или нажмите кнопку. Списания не будет.",
+            reply_markup=days_menu("adm:self"),
+        )
 
     @dp.callback_query(F.data.startswith("adm:self:"))
     async def give_self(query: CallbackQuery) -> None:
@@ -98,16 +129,9 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
             await query.answer("Нет доступа", show_alert=True)
             return
         days = int(query.data.split(":")[2])
-        if days not in plans:
-            await query.answer("Нет такого тарифа", show_alert=True)
-            return
+        waiting.pop(user.id, None)
         await query.answer()
-        try:
-            text, sub_id = await issue(user.id, user.username, days)
-        except PanelError as exc:
-            await query.message.answer(f"Панель отклонила выдачу: {exc}")
-            return
-        await send_sub(query.message, text, sub_id)
+        await give(query.message, user.id, user.username, days)
 
     @dp.callback_query(F.data.startswith("adm:give:"))
     async def give_user(query: CallbackQuery) -> None:
@@ -116,24 +140,9 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
             await query.answer("Нет доступа", show_alert=True)
             return
         _, _, tg_raw, days_raw = query.data.split(":")
-        tg_id = int(tg_raw)
-        days = int(days_raw)
-        if days not in plans:
-            await query.answer("Нет такого тарифа", show_alert=True)
-            return
+        waiting.pop(user.id, None)
         await query.answer()
-        await store.ensure_user(tg_id, None)
-        try:
-            text, sub_id = await issue(tg_id, None, days)
-        except PanelError as exc:
-            await query.message.answer(f"Панель отклонила выдачу: {exc}")
-            return
-        await query.message.answer(f"Подписка выдана {tg_id}.")
-        await send_sub(query.message, text, sub_id)
-        try:
-            await bot.send_message(tg_id, "Вам выдана подписка. Откройте «Моя подписка».")
-        except Exception:
-            pass
+        await give(query.message, int(tg_raw), None, int(days_raw))
 
     @dp.message(F.text.regexp(r"^\d+$"), WaitingAdmin(waiting))
     async def admin_numbers(message: Message) -> None:
@@ -163,10 +172,22 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
             except Exception:
                 pass
             return
-        if mode == "sub":
+        if mode == "sub" and "tg_id" not in state:
+            state["tg_id"] = value
+            state["mode"] = "subdays"
+            await message.answer(
+                f"ID {value}. Введите срок в днях, от 1 до {MAX_DAYS}, или нажмите кнопку.",
+                reply_markup=days_menu("adm:give", value),
+            )
+            return
+        if mode == "subdays":
+            tg_id = int(state["tg_id"])
             waiting.pop(user.id, None)
-            rows = [[InlineKeyboardButton(text=f"{days} дней", callback_data=f"adm:give:{value}:{days}")] for days in plans]
-            await message.answer(f"Срок для {value}:", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+            await give(message, tg_id, None, value)
+            return
+        if mode == "selfsub":
+            waiting.pop(user.id, None)
+            await give(message, user.id, user.username, value)
             return
         if mode == "selfbal":
             waiting.pop(user.id, None)
