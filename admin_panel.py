@@ -10,6 +10,7 @@ from ui import btn, key_btn, notify, say
 from xui import PanelError
 
 MAX_DAYS = 3650
+DAY_STYLE = {30: "primary", 60: "success", 90: "danger"}
 
 
 def admin_reply() -> ReplyKeyboardMarkup:
@@ -23,20 +24,22 @@ def admin_reply() -> ReplyKeyboardMarkup:
 def admin_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [btn("Выдать баланс", callback_data="adm:bal", emoji="admin")],
-            [btn("Выдать подписку", callback_data="adm:sub", emoji="admin")],
-            [btn("Себе баланс", callback_data="adm:selfbal", emoji="admin")],
-            [btn("Себе подписку", callback_data="adm:selfsub", emoji="admin")],
+            [
+                btn("Выдать баланс", callback_data="adm:bal", emoji="admin", style="success"),
+                btn("Выдать подписку", callback_data="adm:sub", emoji="admin", style="primary"),
+                btn("Себе баланс", callback_data="adm:selfbal", emoji="admin", style="success"),
+                btn("Себе подписку", callback_data="adm:selfsub", emoji="admin", style="primary"),
+            ]
         ]
     )
 
 
 def days_menu(prefix: str, tg_id: int | None = None) -> InlineKeyboardMarkup:
-    rows = []
+    row = []
     for days in (30, 60, 90):
         data = f"{prefix}:{days}" if tg_id is None else f"{prefix}:{tg_id}:{days}"
-        rows.append([btn(f"{days} дней", callback_data=data, emoji="plan")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+        row.append(btn(f"{days} дней", callback_data=data, emoji="plan", style=DAY_STYLE[days]))
+    return InlineKeyboardMarkup(inline_keyboard=[row])
 
 
 class WaitingAdmin(BaseFilter):
