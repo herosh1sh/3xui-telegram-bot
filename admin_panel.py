@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from aiogram import F
+from aiogram.filters import BaseFilter
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, Message, ReplyKeyboardMarkup
 
 from xui import PanelError
@@ -25,6 +26,15 @@ def admin_menu() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Себе подписку", callback_data="adm:selfsub")],
         ]
     )
+
+
+class WaitingAdmin(BaseFilter):
+    def __init__(self, waiting: dict[int, dict]) -> None:
+        self.waiting = waiting
+
+    async def __call__(self, message: Message) -> bool:
+        user = message.from_user
+        return bool(user and user.id in self.waiting)
 
 
 def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
@@ -125,7 +135,7 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
         except Exception:
             pass
 
-    @dp.message(F.text.regexp(r"^\d+$"))
+    @dp.message(F.text.regexp(r"^\d+$"), WaitingAdmin(waiting))
     async def admin_numbers(message: Message) -> None:
         user = message.from_user
         if not user or not allowed(user.id) or user.id not in waiting:
