@@ -1,0 +1,13 @@
+[Unit]
+Description=3x-ui subscription bot
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/opt/3xui-telegram-bot
+ExecStart=/opt/3xui-telegram-bot/.venv/bin/python bot.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
