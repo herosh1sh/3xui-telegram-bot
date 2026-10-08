@@ -22,7 +22,6 @@ from aiogram.types import (
 )
 from dotenv import load_dotenv
 
-from admin_panel import register
 from db import Store
 from payments import PayError, Payments
 from xui import PanelError, XuiPanel, gb_to_bytes
@@ -103,7 +102,6 @@ def menu() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Пополнить баланс", callback_data="topup")],
             [InlineKeyboardButton(text="Поддержка", url=SUPPORT_URL)],
             [InlineKeyboardButton(text="О нас", callback_data="about")],
-            [InlineKeyboardButton(text="Админка", callback_data="admin")],
         ]
     )
 
@@ -245,9 +243,6 @@ async def issue(tg_id: int, username: str | None, days: int) -> tuple[str, str]:
 
 def sub_active(row: dict | None) -> bool:
     return bool(row and row["expiry_ms"] > int(time.time() * 1000))
-
-
-register(dp, store, bot, PLANS, ADMIN_IDS, issue, menu)
 
 
 @dp.message(CommandStart())
