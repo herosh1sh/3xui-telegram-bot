@@ -5,11 +5,11 @@ from __future__ import annotations
 from aiohttp import web
 
 PAGE = """<!doctype html>
-<html lang=\"ru\">
+<html lang="ru">
 <head>
-<meta charset=\"utf-8\">
-<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
-<meta http-equiv=\"refresh\" content=\"1;url={url}\">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="1;url={url}">
 <title>{title}</title>
 <style>
 body {{ margin: 0; font: 18px/1.4 sans-serif; background: #111; color: #fff; }}
@@ -20,9 +20,9 @@ main {{ padding: 16px; text-align: center; }}
 </head>
 <body>
 <main>
-  <div class=\"banner\">{title}</div>
+  <div class="banner">{title}</div>
   <p>{text}</p>
-  <p><a href=\"{url}\">Вернуться в бот</a></p>
+  <p><a href="{url}">Вернуться в бот</a></p>
 </main>
 </body>
 </html>
@@ -30,7 +30,7 @@ main {{ padding: 16px; text-align: center; }}
 
 
 def redirect_url(username: str, payload: str) -> str:
-    return f\"https://t.me/{username}?start={payload}\"
+    return f"https://t.me/{username}?start={payload}"
 
 
 def page(title: str, text: str, url: str, color: str) -> str:
@@ -39,37 +39,37 @@ def page(title: str, text: str, url: str, color: str) -> str:
 
 def add_routes(app: web.Application, store, pays, bot) -> None:
     async def pay_return(request: web.Request) -> web.Response:
-        order_id = request.query.get(\"order_id\", \"\")
+        order_id = request.query.get("order_id", "")
         order = await store.get_order(order_id) if order_id else None
-        status = \"canceled\"
+        status = "canceled"
         if order:
             try:
-                status = await pays.status(order[\"provider\"], order[\"provider_id\"])
+                status = await pays.status(order["provider"], order["provider_id"])
             except Exception:
-                status = \"canceled\"
+                status = "canceled"
         me = await bot.get_me()
-        username = me.username or \"\"
-        if status == \"succeeded\":
+        username = me.username or ""
+        if status == "succeeded":
             html = page(
-                \"Оплата прошла\",
-                \"Возвращаем в бота. Нажмите «Проверить оплату», если баланс ещё не обновился.\",
-                redirect_url(username, \"paysuccess\"),
-                \"#86efac\",
+                "Оплата прошла",
+                "Возвращаем в бота. Нажмите «Проверить оплату», если баланс ещё не обновился.",
+                redirect_url(username, "paysuccess"),
+                "#86efac",
             )
-        elif status == \"pending\":
+        elif status == "pending":
             html = page(
-                \"Оплата не завершена\",
-                \"Счёт ещё можно оплатить. Если вы закрыли страницу, баланс не изменился.\",
-                redirect_url(username, \"paypending\"),
-                \"#fde68a\",
+                "Оплата не завершена",
+                "Счёт ещё можно оплатить. Если вы закрыли страницу, баланс не изменился.",
+                redirect_url(username, "paypending"),
+                "#fde68a",
             )
         else:
             html = page(
-                \"Оплата отменена\",
-                \"Деньги не списаны, баланс не изменился.\",
-                redirect_url(username, \"paycancel\"),
-                \"#fca5a5\",
+                "Оплата отменена",
+                "Деньги не списаны, баланс не изменился.",
+                redirect_url(username, "paycancel"),
+                "#fca5a5",
             )
-        return web.Response(text=html, content_type=\"text/html\")
+        return web.Response(text=html, content_type="text/html")
 
-    app.router.add_get(\"/pay/return\", pay_return)
+    app.router.add_get("/pay/return", pay_return)
