@@ -135,6 +135,11 @@ class Store:
             row = await cur.fetchone()
             return int(row[0]) if row else 0
 
+    async def user_exists(self, tg_id: int) -> bool:
+        async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute("SELECT 1 FROM users WHERE tg_id = ?", (tg_id,))
+            return await cur.fetchone() is not None
+
     async def ensure_user(self, tg_id: int, username: str | None) -> dict:
         async with aiosqlite.connect(self.path) as db:
             db.row_factory = aiosqlite.Row
