@@ -35,11 +35,6 @@ CREATE TABLE IF NOT EXISTS users (
     balance INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
 );
-CREATE TABLE IF NOT EXISTS admins (
-    tg_id INTEGER PRIMARY KEY,
-    granted_by INTEGER,
-    created_at INTEGER NOT NULL
-);
 """
 
 
@@ -172,30 +167,3 @@ class Store:
             )
             await db.commit()
             return cur.rowcount == 1
-
-    async def user_ids(self) -> list[int]:
-        async with aiosqlite.connect(self.path) as db:
-            cur = await db.execute("SELECT tg_id FROM users")
-            return [int(row[0]) for row in await cur.fetchall()]
-
-    async def grant_admin(self, tg_id: int, granted_by: int) -> None:
-        async with aiosqlite.connect(self.path) as db:
-            await db.execute(
-                """
-                INSERT INTO admins (tg_id, granted_by, created_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(tg_id) DO NOTHING
-                """,
-                (tg_id, granted_by, int(time.time())),
-            )
-            await db.commit()
-
-    async def revoke_admin(self, tg_id: int) -> None:
-        async with aiosqlite.connect(self.path) as db:
-            await db.execute("DELETE FROM admins WHERE tg_id = ?", (tg_id,))
-            await db.commit()
-
-    async def admin_ids(self) -> set[int]:
-        async with aiosqlite.connect(self.path) as db:
-            cur = await db.execute("SELECT tg_id FROM admins")
-            return {int(row[0]) for row in await cur.fetchall()}
