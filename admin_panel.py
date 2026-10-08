@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from aiogram import F
 from aiogram.filters import BaseFilter
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, Message, ReplyKeyboardMarkup
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message, ReplyKeyboardMarkup
 
+from ui import btn, key_btn, notify, say
 from xui import PanelError
 
 MAX_DAYS = 3650
@@ -13,7 +14,7 @@ MAX_DAYS = 3650
 
 def admin_reply() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Админка")]],
+        keyboard=[[key_btn("Админка", emoji="admin")]],
         resize_keyboard=True,
         is_persistent=True,
     )
@@ -22,10 +23,10 @@ def admin_reply() -> ReplyKeyboardMarkup:
 def admin_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Выдать баланс", callback_data="adm:bal")],
-            [InlineKeyboardButton(text="Выдать подписку", callback_data="adm:sub")],
-            [InlineKeyboardButton(text="Себе баланс", callback_data="adm:selfbal")],
-            [InlineKeyboardButton(text="Себе подписку", callback_data="adm:selfsub")],
+            [btn("Выдать баланс", callback_data="adm:bal", emoji="admin")],
+            [btn("Выдать подписку", callback_data="adm:sub", emoji="admin")],
+            [btn("Себе баланс", callback_data="adm:selfbal", emoji="admin")],
+            [btn("Себе подписку", callback_data="adm:selfsub", emoji="admin")],
         ]
     )
 
@@ -34,7 +35,7 @@ def days_menu(prefix: str, tg_id: int | None = None) -> InlineKeyboardMarkup:
     rows = []
     for days in (30, 60, 90):
         data = f"{prefix}:{days}" if tg_id is None else f"{prefix}:{tg_id}:{days}"
-        rows.append([InlineKeyboardButton(text=f"{days} дней", callback_data=data)])
+        rows.append([btn(f"{days} дней", callback_data=data, emoji="plan")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -55,19 +56,19 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
 
     async def give(message: Message, tg_id: int, username: str | None, days: int) -> None:
         if days < 1 or days > MAX_DAYS:
-            await message.answer(f"Срок от 1 до {MAX_DAYS} дней.", reply_markup=admin_menu())
+            await say(message, f"Срок от 1 до {MAX_DAYS} дней.", reply_markup=admin_menu())
             return
         await store.ensure_user(tg_id, username)
         try:
             text, sub_id = await issue(tg_id, username, days)
         except PanelError as exc:
-            await message.answer(f"Панель отклонила выдачу: {exc}")
+            await say(message, f"Панель отклонила выдачу: {exc}")
             return
-        await message.answer(f"Подписка на {days} дн. выдана {tg_id}.")
+        await say(message, f"Подписка на {days} дн. выдана {tg_id}.")
         await send_sub(message, text, sub_id)
         if username is None:
             try:
-                await bot.send_message(tg_id, f"Вам выдана подписка на {days} дн. Откройте «Моя подписка».")
+                await notify(bot, tg_id, f"Вам выдана подписка на {days} дн. Откройте «Моя подписка».")
             except Exception:
                 pass
 
@@ -77,7 +78,7 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
         if not user or not allowed(user.id):
             return
         waiting.pop(user.id, None)
-        await message.answer("Админ-панель.", reply_markup=admin_menu())
+        await say(message, "Админ-панель.", reply_markup=admin_menu())
 
     @dp.callback_query(F.data == "adm:bal")
     async def ask_balance(query: CallbackQuery) -> None:
@@ -87,7 +88,7 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
             return
         waiting[user.id] = {"mode": "balance"}
         await query.answer()
-        await query.message.answer("Введите Telegram ID пользователя, затем сумму.")
+        await say(query.message, "Введите Telegram ID пользователя, затем сумму.")
 
     @dp.callback_query(F.data == "adm:sub")
     async def ask_sub(query: CallbackQuery) -> None:
@@ -97,7 +98,7 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
             return
         waiting[user.id] = {"mode": "sub"}
         await query.answer()
-        await query.message.answer("Введите Telegram ID пользователя. Потом введите срок в днях.")
+        await say(query.message, "Введите Telegram ID пользователя. Потом введите срок в днях.")
 
     @dp.callback_query(F.data == "adm:selfbal")
     async def ask_self_balance(query: CallbackQuery) -> None:
@@ -107,7 +108,7 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
             return
         waiting[user.id] = {"mode": "selfbal"}
         await query.answer()
-        await query.message.answer("Введите сумму в рублях. Она начислится вам.")
+        await say(query.message, "Введите сумму в рублях. Она начислится вам.")
 
     @dp.callback_query(F.data == "adm:selfsub")
     async def ask_self_sub(query: CallbackQuery) -> None:
@@ -117,7 +118,8 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
             return
         waiting[user.id] = {"mode": "selfsub"}
         await query.answer()
-        await query.message.answer(
+        await say(
+            query.message,
             "Введите срок в днях или нажмите кнопку. Списания не будет.",
             reply_markup=days_menu("adm:self"),
         )
@@ -154,28 +156,30 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
         mode = state.get("mode")
         if mode == "balance" and "tg_id" not in state:
             state["tg_id"] = value
-            await message.answer(f"ID {value}. Теперь введите сумму в рублях.")
+            await say(message, f"ID {value}. Теперь введите сумму в рублях.")
             return
         if mode == "balance":
             waiting.pop(user.id, None)
             if value < 1:
-                await message.answer("Сумма должна быть больше нуля.", reply_markup=admin_menu())
+                await say(message, "Сумма должна быть больше нуля.", reply_markup=admin_menu())
                 return
             await store.ensure_user(state["tg_id"], None)
             balance = await store.add_balance(state["tg_id"], value)
-            await message.answer(
+            await say(
+                message,
                 f"Пользователю {state['tg_id']} начислено {value} ₽. Баланс: {balance} ₽.",
                 reply_markup=admin_menu(),
             )
             try:
-                await bot.send_message(state["tg_id"], f"Баланс пополнен на {value} ₽. Сейчас {balance} ₽.")
+                await notify(bot, state["tg_id"], f"Баланс пополнен на {value} ₽. Сейчас {balance} ₽.")
             except Exception:
                 pass
             return
         if mode == "sub" and "tg_id" not in state:
             state["tg_id"] = value
             state["mode"] = "subdays"
-            await message.answer(
+            await say(
+                message,
                 f"ID {value}. Введите срок в днях, от 1 до {MAX_DAYS}, или нажмите кнопку.",
                 reply_markup=days_menu("adm:give", value),
             )
@@ -192,8 +196,8 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
         if mode == "selfbal":
             waiting.pop(user.id, None)
             if value < 1:
-                await message.answer("Сумма должна быть больше нуля.", reply_markup=admin_menu())
+                await say(message, "Сумма должна быть больше нуля.", reply_markup=admin_menu())
                 return
             await store.ensure_user(user.id, user.username)
             balance = await store.add_balance(user.id, value)
-            await message.answer(f"Ваш баланс: {balance} ₽.", reply_markup=admin_menu())
+            await say(message, f"Ваш баланс: {balance} ₽.", reply_markup=admin_menu())
