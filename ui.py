@@ -62,13 +62,18 @@ def btn(
         return InlineKeyboardButton(**kwargs)
 
 
-def key_btn(text: str, *, emoji: str = "") -> KeyboardButton:
+def key_btn(text: str, *, emoji: str = "", style: str | None = None) -> KeyboardButton:
+    kwargs: dict = {"text": text}
     icon = emoji_id(emoji)
-    if not icon:
-        return KeyboardButton(text=text)
+    if icon:
+        kwargs["icon_custom_emoji_id"] = icon
+    if style in {"primary", "success", "danger"}:
+        kwargs["style"] = style
     try:
-        return KeyboardButton(text=text, icon_custom_emoji_id=icon)
+        return KeyboardButton(**kwargs)
     except TypeError:
+        kwargs.pop("icon_custom_emoji_id", None)
+        kwargs.pop("style", None)
         return KeyboardButton(text=text)
 
 
