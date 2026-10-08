@@ -129,6 +129,35 @@ class XuiPanel:
             raise PanelError("нет включённых инбаундов кроме mtproto")
         return ids
 
+
+    async def find_by_telegram(self, tg_id: int) -> dict[str, Any] | None:
+        needle = str(tg_id)
+        email = f"tg{tg_id}"
+        fallback = None
+        for inbound in await self.list_inbounds():
+            if str(inbound.get("protocol") or "").lower() == "mtproto":
+                continue
+            settings = inbound.get("settings")
+            if isinstance(settings, str):
+                try:
+                    settings = json.loads(settings)
+                except json.JSONDecodeError:
+                    continue
+            clients = (settings or {}).get("clients") if isinstance(settings, dict) else None
+            if not isinstance(clients, list):
+                continue
+            for client in clients:
+                if not isinstance(client, dict):
+                    continue
+                tg = str(client.get("tgId") or client.get("tg_id") or "").strip()
+                comment = str(client.get("comment") or "")
+                if client.get("email") != email and tg != needle and f"telegram:{needle}" not in comment:
+                    continue
+                fallback = client
+                if client.get("enable") is not False:
+                    return client
+        return fallback
+
     async def get_client(self, email: str) -> dict[str, Any] | None:
         try:
             data = await self._request("GET", f"/panel/api/clients/get/{quote(email, safe='')}")
