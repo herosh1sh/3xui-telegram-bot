@@ -16,6 +16,18 @@ CREATE TABLE IF NOT EXISTS subs (
     created_at INTEGER NOT NULL,
     expiry_ms INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS orders (
+    order_id TEXT PRIMARY KEY,
+    tg_id INTEGER NOT NULL,
+    username TEXT,
+    days INTEGER NOT NULL,
+    amount_rub INTEGER NOT NULL,
+    provider TEXT NOT NULL,
+    provider_id TEXT,
+    pay_url TEXT,
+    status TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
 """
 
 
@@ -26,7 +38,7 @@ class Store:
     async def init(self) -> None:
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(self.path) as db:
-            await db.execute(SCHEMA)
+            await db.executescript(SCHEMA)
             await db.commit()
 
     async def get(self, tg_id: int) -> dict | None:
@@ -58,6 +70,51 @@ class Store:
                 """,
                 (tg_id, username or "", email, sub_id, int(time.time()), expiry_ms),
             )
+            await db.commit()
+
+    async def save_order(
+        self,
+        order_id: str,
+        tg_id: int,
+        username: str | None,
+        days: int,
+        amount_rub: int,
+        provider: str,
+        provider_id: str,
+        pay_url: str,
+    ) -> None:
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                """
+                INSERT INTO orders (
+                    order_id, tg_id, username, days, amount_rub, provider,
+                    provider_id, pay_url, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                """,
+                (
+                    order_id,
+                    tg_id,
+                    username or "",
+                    days,
+                    amount_rub,
+                    provider,
+                    provider_id,
+                    pay_url,
+                    int(time.time()),
+                ),
+            )
+            await db.commit()
+
+    async def get_order(self, order_id: str) -> dict | None:
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,))
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+    async def mark_order(self, order_id: str, status: str) -> None:
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute("UPDATE orders SET status = ? WHERE order_id = ?", (status, order_id))
             await db.commit()
 
     async def delete(self, tg_id: int) -> None:
