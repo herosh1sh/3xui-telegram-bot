@@ -27,7 +27,7 @@ from dotenv import load_dotenv
 from admin_panel import admin_reply, register
 from db import Store
 from payments import PayError, Payments
-from ui import btn, key_btn, say
+from ui import btn, key_btn, say, with_emoji
 from xui import PanelError, XuiPanel, gb_to_bytes
 
 load_dotenv()
@@ -359,7 +359,7 @@ def sub_active(row: dict | None) -> bool:
     return bool(row and row["expiry_ms"] > int(time.time() * 1000))
 
 
-@dp.message(F.text == "Профиль")
+@dp.message(F.text.endswith("Профиль"))
 async def profile_button(message: Message) -> None:
     user = message.from_user
     if not user or not allowed(user.id):
@@ -382,22 +382,27 @@ async def profile_button(message: Message) -> None:
     )
 
 
-@dp.message(F.text == "Подписка")
+def menu_pressed(message: Message, label: str, emoji: str) -> bool:
+    shown, _ = with_emoji(label, emoji)
+    return (message.text or "").strip() in {label, shown}
+
+
+@dp.message(F.text.endswith("Подписка"))
 async def sub_button(message: Message) -> None:
     user = message.from_user
-    if not user or not allowed(user.id):
+    if not user or not allowed(user.id) or not menu_pressed(message, "Подписка", "sub"):
         return
     existing = await live_sub(user.id)
     if not sub_active(existing):
         await say(
             message,
-            "Подписка не активна. Выберите срок:\n30 дней — 100 ₽\n60 дней — 250 ₽\n90 дней — 500 ₽",
+            "Подписки нет. Выберите срок:\n30 дней — 100 ₽\n60 дней — 250 ₽\n90 дней — 500 ₽",
             reply_markup=plans_menu(),
             image="plans",
         )
         return
     stats = await panel.client_traffic(existing["email"])
-    text = format_card(
+    card = format_card(
         existing["email"],
         existing["sub_id"],
         existing["expiry_ms"],
@@ -405,11 +410,11 @@ async def sub_button(message: Message) -> None:
         used_up=stats["up"],
         used_down=stats["down"],
         traffic_total=stats["total"],
-    )
-    await send_sub(message, text, existing["sub_id"])
+    ).replace("Подписка готова.", "Действующая подписка.", 1)
+    await send_sub(message, card, existing["sub_id"])
 
 
-@dp.message(F.text == "Баланс")
+@dp.message(F.text.endswith("Баланс"))
 async def balance_button(message: Message) -> None:
     user = message.from_user
     if not user or not allowed(user.id):
@@ -417,14 +422,14 @@ async def balance_button(message: Message) -> None:
     await say(message, topup_text(), reply_markup=topup_menu(), image="topup")
 
 
-@dp.message(F.text == "Помощь")
+@dp.message(F.text.endswith("Помощь"))
 async def help_button(message: Message) -> None:
     if not message.from_user or not allowed(message.from_user.id):
         return
     await say(message, f"Поддержка: {SUPPORT_URL}", reply_markup=profile_menu(), image="support")
 
 
-@dp.message(F.text == "О нас")
+@dp.message(F.text.endswith("О нас"))
 async def about_button(message: Message) -> None:
     if not message.from_user or not allowed(message.from_user.id):
         return
@@ -683,7 +688,7 @@ async def my_sub(query: CallbackQuery) -> None:
     await query.answer()
     existing = await live_sub(user.id)
     if not sub_active(existing):
-        await say(query.message, "Подписка не активна. Выберите срок:\n30 дней — 100 ₽\n60 дней — 250 ₽\n90 дней — 500 ₽", reply_markup=plans_menu(), image="plans")
+        await say(query.message, "Подписки нет. Выберите срок:\n30 дней — 100 ₽\n60 дней — 250 ₽\n90 дней — 500 ₽", reply_markup=plans_menu(), image="plans")
         return
     stats = await panel.client_traffic(existing["email"])
     text = format_card(
