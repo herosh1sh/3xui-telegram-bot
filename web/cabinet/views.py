@@ -174,12 +174,29 @@ def login_password(request):
         return JsonResponse({"error": str(exc)}, status=500)
 
 
+async def traffic_points(tg_id: int, used: int) -> list[dict]:
+    async with aiosqlite.connect(store.path) as db:
+        await db.execute("CREATE TABLE IF NOT EXISTS traffic_points (id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER NOT NULL, used INTEGER NOT NULL, created_at INTEGER NOT NULL)")
+        await db.execute("INSERT INTO traffic_points (tg_id, used, created_at) VALUES (?, ?, ?)", (tg_id, used, int(time.time())))
+        await db.commit()
+        cur = await db.execute("SELECT used, created_at FROM traffic_points WHERE tg_id = ? ORDER BY id DESC LIMIT 12", (tg_id,))
+        rows = list(reversed(await cur.fetchall()))
+    return [{"used": row[0], "when": when(row[1])} for row in rows]
+
+
 async def me(request):
     user_id = await session_user(request)
     if not user_id:
         return JsonResponse({"error": "Нужен вход"}, status=401)
     account = await store.ensure_user(user_id, None)
+    sub = await subscription(user_id)
+    used = 0
+    row = await store.get(user_id)
+    if row:
+        stats = await panel.client_traffic(row["email"])
+        used = int(stats["up"]) + int(stats["down"])
     return JsonResponse({
+        "traffic": await traffic_points(user_id, used),
         "tg_id": user_id,
         "bot_id": account["id"],
         "balance": account["balance"],
@@ -188,7 +205,7 @@ async def me(request):
         "trial_days": TRIAL_DAYS,
         "plans": [{"days": days, "price": price} for days, price in PLANS.items()],
         "providers": [{"code": code, "title": title} for code, title in pays.enabled()],
-        "subscription": await subscription(user_id),
+        "subscription": sub,
         "history": await history(user_id),
     })
 
