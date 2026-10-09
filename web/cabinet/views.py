@@ -1,4 +1,6 @@
 import hashlib
+import hmac
+import os
 import json
 import secrets
 import sqlite3
@@ -106,6 +108,37 @@ async def history(tg_id):
         rows.append((order["created_at"], f"{title} {order['provider']}", int(order["amount_rub"]), STATUS.get(order["status"], order["status"])))
     rows.sort(reverse=True)
     return [{"when": when(ts), "title": title, "amount": amount, "status": status} for ts, title, amount, status in rows[:10]]
+
+
+
+def telegram_check(params: dict[str, str]) -> bool:
+    received = params.get("hash", "")
+    pairs = [f"{key}={value}" for key, value in sorted(params.items()) if key != "hash"]
+    secret = hashlib.sha256(os.environ.get("BOT_TOKEN", "").encode()).digest()
+    computed = hmac.new(secret, "\n".join(pairs).encode(), hashlib.sha256).hexdigest()
+    return bool(received) and hmac.compare_digest(computed, received)
+
+
+
+def telegram_config(request):
+    return JsonResponse({"bot": os.environ.get("BOT_USERNAME", "")})
+
+
+def telegram_login(request):
+    params = {key: value for key, value in request.GET.items()}
+    auth_date = int(params.get("auth_date") or 0)
+    if not telegram_check(params) or time.time() - auth_date > 86400:
+        return HttpResponse("Telegram не подтвердил вход", status=401)
+    tg_id = int(params["id"])
+    with sqlite3.connect(store.path) as db:
+        db.execute(
+            "INSERT OR IGNORE INTO users (tg_id, username, balance, created_at) VALUES (?, ?, 0, ?)",
+            (tg_id, params.get("username") or params.get("first_name") or "", int(time.time())),
+        )
+    response = set_session(tg_id)
+    response.status_code = 302
+    response["Location"] = "/cabinet"
+    return response
 
 
 def set_session(tg_id: int):
