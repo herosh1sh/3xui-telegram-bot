@@ -6,6 +6,7 @@ import asyncio
 import secrets
 
 from aiogram import F
+from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.filters import BaseFilter
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message, ReplyKeyboardMarkup
 
@@ -148,6 +149,8 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
         if not user or not allowed(user.id) or user.id not in waiting:
             return
         mode = waiting[user.id].get("mode")
+        if mode not in {"announce", "promo_code"}:
+            raise SkipHandler()
         if mode == "promo_code":
             code = (message.text or "").strip()
             if not code or code == "Админка":
@@ -255,7 +258,7 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
         await query.answer()
         await give(query.message, int(tg_raw), None, int(days_raw))
 
-    @dp.message(F.text.regexp(r"^\d+$"), WaitingAdmin(waiting))
+    @dp.message(F.text.regexp(r"^\s*\d+\s*$"), WaitingAdmin(waiting))
     async def admin_numbers(message: Message) -> None:
         user = message.from_user
         if not user or not allowed(user.id) or user.id not in waiting:
@@ -263,7 +266,7 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
         state = waiting[user.id]
         if state.get("mode") in {"announce", "promo_code", "promo_kind"}:
             return
-        value = int(message.text or "0")
+        value = int((message.text or "0").strip())
         mode = state.get("mode")
         if mode == "promo_value":
             if value < 1:
