@@ -33,29 +33,32 @@ export default function Cabinet() {
   const [promo, setPromo] = useState("");
   const [pay, setPay] = useState(null);
   const [error, setError] = useState("");
-  const [login, setLogin] = useState("");
-  const [password, setPassword] = useState("");
-
   async function load() { setMe(await api("/api/me")); }
   useEffect(() => { load().catch(() => setMe(null)); }, []);
-  async function submit(path) {
-    setError("");
-    try { await api(path, { login, password }); await load(); }
-    catch (e) { setError(e.message); }
-  }
+  useEffect(() => {
+    if (me) return;
+    fetch("/api/telegram").then(res => res.json()).then(data => {
+      const box = document.getElementById("tg-login");
+      if (!box || !data.bot || box.dataset.ready) return;
+      box.dataset.ready = "1";
+      const script = document.createElement("script");
+      script.src = "https://telegram.org/js/telegram-widget.js?22";
+      script.async = true;
+      script.setAttribute("data-telegram-login", data.bot);
+      script.setAttribute("data-size", "large");
+      script.setAttribute("data-auth-url", window.location.origin + "/auth/telegram");
+      script.setAttribute("data-request-access", "write");
+      box.appendChild(script);
+    }).catch(e => setError(e.message));
+  }, [me]);
 
   if (!me) return (
     <Layout>
       <main className="shell hero">
         <h1>Вход</h1>
-        <p className="muted">Войдите по логину и паролю или зарегистрируйтесь.</p>
+        <p className="muted">Войдите через Telegram. Логин и пароль сайта больше не используются.</p>
         <article className="card" style={{maxWidth:460}}>
-          <input placeholder="Логин" value={login} onChange={e => setLogin(e.target.value)} />
-          <input style={{marginTop:8}} type="password" placeholder="Пароль" value={password} onChange={e => setPassword(e.target.value)} />
-          <div className="row" style={{marginTop:12}}>
-            <button onClick={() => submit("/api/login")}>Войти</button>
-            <button className="ghost" onClick={() => submit("/api/register")}>Регистрация</button>
-          </div>
+          <div id="tg-login" />
           {error && <p>{error}</p>}
         </article>
       </main>
