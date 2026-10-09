@@ -183,11 +183,53 @@ def about_menu() -> InlineKeyboardMarkup:
     )
 
 
+
+STATUS_TITLE = {"paid": "оплачено", "canceled": "отменено", "pending": "ожидает", "выдано": "выдано", "куплено": "куплено"}
+
+
+async def history_text(tg_id: int) -> str:
+    import datetime as dt
+    rows = []
+    for event in await store.list_events(tg_id, 20):
+        rows.append((event["created_at"], event["title"], int(event["amount_rub"]), STATUS_TITLE.get(event["status"], event["status"])))
+    for order in await store.list_orders(tg_id, 20):
+        title = "Пополнение" if int(order["days"] or 0) == 0 else f"Подписка {order['days']} дн."
+        rows.append((order["created_at"], f"{title} {order['provider']}", int(order["amount_rub"]), STATUS_TITLE.get(order["status"], order["status"])))
+    rows.sort(key=lambda item: item[0], reverse=True)
+    seen = set()
+    lines = ["История пополнений и подписок", ""]
+    for created, title, amount, status in rows:
+        key = (created, title, amount, status)
+        if key in seen:
+            continue
+        seen.add(key)
+        when = dt.datetime.fromtimestamp(created).strftime("%d.%m.%Y %H:%M")
+        lines.append(f"{when} — {title} — {amount} ₽ — {status}")
+        if len(lines) >= 12:
+            break
+    if len(lines) == 2:
+        lines.append("Пока пусто.")
+    return "\n".join(lines)
+
+
+async def profile_text(user_id: int, username: str | None) -> str:
+    account = await store.ensure_user(user_id, username)
+    return "\n".join([
+        "Профиль",
+        "",
+        f"Баланс: {account['balance']} ₽",
+        f"Telegram ID: `{user_id}`",
+        f"ID в боте: `{account['id']}`",
+        "",
+        await history_text(user_id),
+    ])
+
+
 def profile_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [btn("История", callback_data="history", emoji="profile", style="primary")],
-            [btn("Промокод", callback_data="promo", emoji="profile", style="success")],
+            [btn("Промокод", callback_data="promo", emoji="profile", style="primary")],
             [btn("Вернуться", callback_data="back", emoji="back")],
         ]
     )
@@ -395,22 +437,7 @@ async def profile_button(message: Message) -> None:
     user = message.from_user
     if not user or not allowed(user.id):
         return
-    account = await store.ensure_user(user.id, user.username)
-    await say(
-        message,
-        "\n".join(
-            [
-                "Профиль",
-                "",
-                f"Баланс: {account['balance']} ₽",
-                f"Telegram ID: `{user.id}`",
-                f"ID в боте: `{account['id']}`",
-            ]
-        ),
-        parse_mode="Markdown",
-        reply_markup=profile_menu(),
-        image="profile",
-    )
+    await say(message, await profile_text(user.id, user.username), parse_mode="Markdown", reply_markup=profile_menu(), image="profile")
 
 
 def menu_pressed(message: Message, label: str, emoji: str) -> bool:
@@ -537,20 +564,7 @@ async def profile(query: CallbackQuery) -> None:
         await query.answer("Нет доступа", show_alert=True)
         return
     await query.answer()
-    account = await store.ensure_user(user.id, user.username)
-    await say(
-        query.message,
-        "\n".join(
-            [
-                "Профиль",
-                "",
-                f"Баланс: {account['balance']} ₽",
-                f"Telegram ID: `{user.id}`",
-                f"ID в боте: `{account['id']}`",
-            ]
-        ),
-        parse_mode="Markdown",
-        reply_markup=profile_menu(),
+    await say(query.message, await profile_text(user.id, user.username), parse_mode="Markdown", reply_markup=profile_menu(),
         image="profile",
     )
 
@@ -761,17 +775,7 @@ async def history(query: CallbackQuery) -> None:
         await query.answer("Нет доступа", show_alert=True)
         return
     await query.answer()
-    events = await store.list_events(user.id)
-    if not events:
-        await say(query.message, "История пуста.", reply_markup=profile_menu(), image="profile")
-        return
-    import datetime as dt
-    lines = ["История", ""]
-    for event in events:
-        when = dt.datetime.fromtimestamp(event["created_at"]).strftime("%d.%m.%Y %H:%M")
-        status = STATUS_TITLE.get(event["status"], event["status"])
-        lines.append(f"{when} — {event['title']} — {event['amount_rub']} ₽ — {status}")
-    await say(query.message, "\n".join(lines), reply_markup=profile_menu(), image="profile")
+    await say(query.message, await history_text(user.id), reply_markup=profile_menu(), image="profile")
 
 
 @dp.callback_query(F.data.startswith("buy:"))
