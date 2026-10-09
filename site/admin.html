@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="apay-tag" content="RQUMVEZW5NOIIEUTCBJAYYB6PT2AVZ2C">
+  <title>Админка — HeroshishVPN</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header><div class="wrap nav"><a class="logo" href="/cabinet">HeroshishVPN</a><a class="button ghost" href="/cabinet">Кабинет</a></div></header>
+  <main class="wrap" style="padding:32px 0 64px">
+    <h1>Админка</h1>
+    <div class="grid" id="stats"></div>
+    <div class="cards" style="margin-top:16px">
+      <article class="card">
+        <h2>Найти пользователя</h2>
+        <div class="row"><input id="q" placeholder="Telegram ID или @username"><button onclick="search()">Найти</button></div>
+        <div id="users"></div>
+      </article>
+      <article class="card">
+        <h2>Выдача</h2>
+        <input id="tg" placeholder="Telegram ID" style="width:100%;margin-bottom:8px">
+        <div class="row"><input id="sum" type="number" placeholder="Баланс, ₽"><button class="green" onclick="giveBalance()">Выдать баланс</button></div>
+        <div class="row" style="margin-top:8px"><input id="days" type="number" placeholder="Дней"><button class="blue" onclick="giveSub()">Выдать подписку</button></div>
+      </article>
+    </div>
+    <div class="cards" style="margin-top:16px">
+      <article class="card">
+        <h2>Промокод</h2>
+        <input id="code" placeholder="Код или авто" style="width:100%;margin-bottom:8px">
+        <select id="kind"><option value="balance">Баланс, ₽</option><option value="days">Дни</option></select>
+        <input id="value" type="number" placeholder="Значение">
+        <input id="uses" type="number" placeholder="Активаций, 0 = без лимита" value="1">
+        <button onclick="makePromo()">Создать</button>
+        <p id="promo-out" class="muted"></p>
+      </article>
+      <article class="card">
+        <h2>Оповещение</h2>
+        <textarea id="broadcast" style="width:100%;min-height:90px" placeholder="Текст всем пользователям"></textarea>
+        <button class="red" onclick="broadcast()">Отправить</button>
+        <p id="cast-out" class="muted"></p>
+      </article>
+    </div>
+    <article class="card" style="margin-top:16px"><h2>Последние платежи</h2><div id="orders"></div></article>
+  </main>
+  <script>
+    async function api(path, body) {
+      const res = await fetch(path, {method: body ? "POST" : "GET", headers: {"Content-Type": "application/json"}, body: body ? JSON.stringify(body) : undefined});
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Ошибка");
+      return data;
+    }
+    async function load() {
+      const data = await api("/api/admin/overview");
+      document.getElementById("stats").innerHTML = data.stats.map(s => `<article class="card"><b>${s.value}</b><div class="muted">${s.label}</div></article>`).join("");
+      document.getElementById("orders").innerHTML = `<table>${data.orders.map(o => `<tr><td>${o.when}</td><td>${o.tg_id}</td><td>${o.provider}</td><td>${o.amount} ₽</td><td>${o.status}</td></tr>`).join("")}</table>`;
+    }
+    async function search() {
+      const data = await api("/api/admin/users?q=" + encodeURIComponent(document.getElementById("q").value));
+      document.getElementById("users").innerHTML = data.users.map(u => `<p>${u.tg_id} @${u.username || "—"} · ${u.balance} ₽ · ${u.sub}</p>`).join("") || "<p>Не найдено</p>";
+    }
+    async function giveBalance() { const d = await api("/api/admin/balance", {tg_id: Number(document.getElementById("tg").value), amount: Number(document.getElementById("sum").value)}); alert(`Баланс: ${d.balance} ₽`); }
+    async function giveSub() { await api("/api/admin/sub", {tg_id: Number(document.getElementById("tg").value), days: Number(document.getElementById("days").value)}); alert("Подписка выдана"); }
+    async function makePromo() {
+      const d = await api("/api/admin/promo", {code: document.getElementById("code").value, kind: document.getElementById("kind").value, value: Number(document.getElementById("value").value), uses: Number(document.getElementById("uses").value)});
+      document.getElementById("promo-out").textContent = `Код ${d.code}`;
+    }
+    async function broadcast() {
+      const d = await api("/api/admin/announce", {text: document.getElementById("broadcast").value});
+      document.getElementById("cast-out").textContent = `Доставлено: ${d.sent}. Не дошло: ${d.failed}.`;
+    }
+    load().catch(e => alert(e.message));
+  </script>
+</body>
+</html>
