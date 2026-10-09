@@ -67,6 +67,10 @@ ONE_PER_USER = env_bool("ONE_PER_USER", True)
 MAX_CLIENTS = int(env("MAX_CLIENTS", "0") or 0)
 ADMIN_IDS = {int(x) for x in env("ADMIN_IDS").split(",") if x.strip()}
 DB_PATH = env("DB_PATH", "data/subs.sqlite")
+_db_path = Path(DB_PATH)
+if not _db_path.is_absolute():
+    DB_PATH = str(Path(__file__).resolve().parent / _db_path)
+Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 VERIFY_SSL = env_bool("VERIFY_SSL", True)
 SUPPORT_URL = env("SUPPORT_URL", CHANNEL_URL)
 TRIAL_DAYS = int(env("TRIAL_DAYS", "1") or 1)
