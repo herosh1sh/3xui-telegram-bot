@@ -3,7 +3,10 @@ import { Link } from "react-router-dom";
 
 async function api(path, body) {
   const res = await fetch(path, { method: body ? "POST" : "GET", headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
-  const data = await res.json();
+  const raw = await res.text();
+  let data = {};
+  try { data = raw ? JSON.parse(raw) : {}; }
+  catch { throw new Error("Сервер вернул страницу вместо ответа. Django должен быть запущен, а nginx проксировать /api/."); }
   if (!res.ok) throw new Error(data.error || "Ошибка");
   return data;
 }
