@@ -121,7 +121,11 @@ def telegram_check(params: dict[str, str]) -> bool:
 
 
 def telegram_config(request):
-    return JsonResponse({"bot": os.environ.get("BOT_USERNAME", "")})
+    token = os.environ.get("BOT_TOKEN", "")
+    return JsonResponse({
+        "bot": os.environ.get("BOT_USERNAME", ""),
+        "bot_id": token.split(":", 1)[0] if token else "",
+    })
 
 
 def telegram_login(request):
