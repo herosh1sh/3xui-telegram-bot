@@ -500,7 +500,12 @@ async def cabinet_button(message: Message) -> None:
     user = message.from_user
     if not user or not allowed(user.id):
         return
-    link = await SITE_APP["site_link"](user.id)
+    from site_api import create_login_link
+    public = env("PUBLIC_URL")
+    if not public:
+        await say(message, "В .env не задан PUBLIC_URL.", image="profile")
+        return
+    link = await create_login_link(store, public, user.id)
     await say(message, f"Личный кабинет:\n{link}", image="profile")
 
 
