@@ -93,6 +93,11 @@ pays = Payments(
     io_project=env("IO2328_PROJECT"),
     io_api_key=env("IO2328_API_KEY"),
     io_return_url=env("IO2328_RETURN_URL"),
+    antilopay_secret_id=env("ANTILOPAY_SECRET_ID"),
+    antilopay_private_key=env("ANTILOPAY_PRIVATE_KEY"),
+    antilopay_project_id=env("ANTILOPAY_PROJECT_ID"),
+    antilopay_email=env("ANTILOPAY_EMAIL"),
+    antilopay_success_url=env("ANTILOPAY_SUCCESS_URL"),
 )
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
