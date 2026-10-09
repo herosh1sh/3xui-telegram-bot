@@ -1,4 +1,4 @@
-"""Счета: ЮKassa, Crypto Pay и 2328. Статус проверяется по кнопке, вебхук не нужен."""
+"""Счета: ЮKassa, Crypto Pay, 2328 и Antilopay. Статус проверяется по кнопке, вебхук не нужен."""
 
 from __future__ import annotations
 
@@ -39,6 +39,11 @@ class Payments:
         io_project: str,
         io_api_key: str,
         io_return_url: str,
+        antilopay_secret_id: str = "",
+        antilopay_private_key: str = "",
+        antilopay_project_id: str = "",
+        antilopay_email: str = "",
+        antilopay_success_url: str = "",
     ) -> None:
         self.yookassa_shop_id = yookassa_shop_id
         self.yookassa_secret = yookassa_secret
@@ -50,6 +55,11 @@ class Payments:
         self.io_project = io_project
         self.io_api_key = io_api_key
         self.io_return_url = io_return_url or self.yookassa_return_url
+        self.antilopay_secret_id = antilopay_secret_id
+        self.antilopay_private_key = antilopay_private_key
+        self.antilopay_project_id = antilopay_project_id
+        self.antilopay_email = antilopay_email or "pay@heroshishvpn.ru"
+        self.antilopay_success_url = antilopay_success_url or self.yookassa_return_url
         self.http = httpx.AsyncClient(timeout=30)
 
     def enabled(self) -> list[tuple[str, str]]:
@@ -60,6 +70,8 @@ class Payments:
             items.append(("cryptopay", "Crypto Pay"))
         if self.io_project and self.io_api_key:
             items.append(("2328", "Крипта, 2328"))
+        if self.antilopay_secret_id and self.antilopay_private_key and self.antilopay_project_id:
+            items.append(("antilopay", "Antilopay"))
         return items
 
     async def close(self) -> None:
@@ -76,6 +88,8 @@ class Payments:
             return await self._cryptopay(order_id, amount_rub, days)
         if provider == "2328":
             return await self._2328(order_id, amount_rub, days)
+        if provider == "antilopay":
+            return await self._antilopay(order_id, amount_rub, days)
         raise PayError("неизвестный способ оплаты")
 
     async def is_paid(self, provider: str, provider_id: str) -> bool:
@@ -88,6 +102,8 @@ class Payments:
             return await self._cryptopay_status(provider_id)
         if provider == "2328":
             return "succeeded" if await self._2328_paid(provider_id) else "canceled"
+        if provider == "antilopay":
+            return await self._antilopay_status(provider_id)
         return "canceled"
 
     async def _yookassa(self, order_id: str, amount_rub: int, days: int) -> Invoice:
@@ -203,3 +219,85 @@ class Payments:
         result = data.get("result") if isinstance(data.get("result"), dict) else data
         status = str(result.get("status") or result.get("payment_status") or "").lower()
         return status in {"paid", "success", "succeeded", "completed", "confirmed"}
+
+    async def _antilopay(self, order_id: str, amount_rub: int, days: int) -> Invoice:
+        payload = {
+            "project_identificator": self.antilopay_project_id,
+            "amount": amount_rub,
+            "order_id": order_id,
+            "currency": "RUB",
+            "product_name": "Пополнение баланса",
+            "product_type": "services",
+            "description": f"Пополнение баланса на {amount_rub} ₽",
+            "customer": {"email": self.antilopay_email},
+        }
+        success = self.antilopay_success_url
+        if success.startswith("https://"):
+            payload["success_url"] = self._with_order(success, order_id)
+            payload["fail_url"] = self._with_order(success, order_id)
+        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+        resp = await self.http.post(
+            "https://lk.antilopay.com/api/v1/payment/create",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Apay-Secret-Id": self.antilopay_secret_id,
+                "X-Apay-Sign": _antilopay_sign(body, self.antilopay_private_key),
+                "X-Apay-Sign-Version": "1",
+            },
+        )
+        data = resp.json()
+        if resp.status_code >= 400 or data.get("code") not in (0, None):
+            raise PayError(str(data.get("error") or data)[:300])
+        pay_url = str(data.get("payment_url") or "")
+        if not pay_url:
+            raise PayError(f"Antilopay не вернул ссылку: {str(data)[:300]}")
+        return Invoice(order_id, pay_url)
+
+    async def _antilopay_status(self, order_id: str) -> str:
+        body = json.dumps(
+            {"project_identificator": self.antilopay_project_id, "order_id": order_id},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode()
+        resp = await self.http.post(
+            "https://lk.antilopay.com/api/v1/payment/check",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Apay-Secret-Id": self.antilopay_secret_id,
+                "X-Apay-Sign": _antilopay_sign(body, self.antilopay_private_key),
+                "X-Apay-Sign-Version": "1",
+            },
+        )
+        data = resp.json()
+        if resp.status_code >= 400 or data.get("code") not in (0, None):
+            raise PayError(str(data.get("error") or data)[:300])
+        status = str(data.get("status") or "").upper()
+        if status == "SUCCESS":
+            return "succeeded"
+        if status == "PENDING":
+            return "pending"
+        return "canceled"
+
+
+def _antilopay_sign(payload: bytes, private_key: str) -> str:
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+
+    raw = "".join(private_key.split())
+    for marker in (
+        "-----BEGINPRIVATEKEY-----",
+        "-----ENDPRIVATEKEY-----",
+        "-----BEGINRSAPRIVATEKEY-----",
+        "-----ENDRSAPRIVATEKEY-----",
+    ):
+        raw = raw.replace(marker, "")
+    der = base64.b64decode(raw)
+    try:
+        key = serialization.load_der_private_key(der, password=None)
+    except ValueError:
+        pem = b"-----BEGIN RSA PRIVATE KEY-----\n" + base64.b64encode(der) + b"\n-----END RSA PRIVATE KEY-----\n"
+        key = serialization.load_pem_private_key(pem, password=None)
+    signature = key.sign(payload, padding.PKCS1v15(), hashes.SHA256())
+    return base64.b64encode(signature).decode()
