@@ -39,12 +39,16 @@ def admin_menu() -> InlineKeyboardMarkup:
     )
 
 
+def back_only() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[btn("Назад", callback_data="adm:back")]])
+
+
 def days_menu(prefix: str, tg_id: int | None = None) -> InlineKeyboardMarkup:
     row = []
     for days in (30, 60, 90):
         data = f"{prefix}:{days}" if tg_id is None else f"{prefix}:{tg_id}:{days}"
         row.append(btn(f"{days} дней", callback_data=data, emoji="plan", style=DAY_STYLE[days]))
-    return InlineKeyboardMarkup(inline_keyboard=[row])
+    return InlineKeyboardMarkup(inline_keyboard=[row, [btn("Назад", callback_data="adm:back")]])
 
 
 class WaitingAdmin(BaseFilter):
@@ -88,6 +92,16 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
         waiting.pop(user.id, None)
         await say(message, "Админ-панель.", reply_markup=admin_menu())
 
+    @dp.callback_query(F.data == "adm:back")
+    async def admin_back(query: CallbackQuery) -> None:
+        user = query.from_user
+        if not user or not allowed(user.id):
+            await query.answer("Нет доступа", show_alert=True)
+            return
+        waiting.pop(user.id, None)
+        await query.answer()
+        await say(query.message, "Админ-панель.", reply_markup=admin_menu(), image="admin")
+
     @dp.callback_query(F.data == "adm:bal")
     async def ask_balance(query: CallbackQuery) -> None:
         user = query.from_user
@@ -96,7 +110,7 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
             return
         waiting[user.id] = {"mode": "balance"}
         await query.answer()
-        await say(query.message, "Введите Telegram ID пользователя, затем сумму.")
+        await say(query.message, "Введите Telegram ID пользователя, затем сумму.", reply_markup=back_only(), image="admin")
 
     @dp.callback_query(F.data == "adm:sub")
     async def ask_sub(query: CallbackQuery) -> None:
@@ -106,7 +120,7 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
             return
         waiting[user.id] = {"mode": "sub"}
         await query.answer()
-        await say(query.message, "Введите Telegram ID пользователя. Потом введите срок в днях.")
+        await say(query.message, "Введите Telegram ID пользователя. Потом введите срок в днях.", reply_markup=back_only(), image="admin")
 
     @dp.callback_query(F.data == "adm:selfbal")
     async def ask_self_balance(query: CallbackQuery) -> None:
@@ -116,7 +130,7 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
             return
         waiting[user.id] = {"mode": "selfbal"}
         await query.answer()
-        await say(query.message, "Введите сумму в рублях. Она начислится вам.")
+        await say(query.message, "Введите сумму в рублях. Она начислится вам.", reply_markup=back_only(), image="admin")
 
     @dp.callback_query(F.data == "adm:announce")
     async def ask_announce(query: CallbackQuery) -> None:
@@ -126,7 +140,7 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
             return
         waiting[user.id] = {"mode": "announce"}
         await query.answer()
-        await say(query.message, "Напишите текст оповещения. Он уйдёт всем пользователям бота.", image="admin")
+        await say(query.message, "Напишите текст оповещения. Он уйдёт всем пользователям бота.", reply_markup=back_only(), image="admin")
 
     @dp.message(F.text, WaitingAdmin(waiting))
     async def admin_announce(message: Message) -> None:
@@ -146,10 +160,13 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
             await say(
                 message,
                 f"Код {code.upper()}. Что он даёт?",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                    btn("Баланс", callback_data="adm:promokind:balance", emoji="admin", style="success"),
-                    btn("Дни", callback_data="adm:promokind:days", emoji="admin", style="primary"),
-                ]]),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        btn("Баланс", callback_data="adm:promokind:balance", emoji="admin", style="success"),
+                        btn("Дни", callback_data="adm:promokind:days", emoji="admin", style="primary"),
+                    ],
+                    [btn("Назад", callback_data="adm:back")],
+                ]),
                 image="admin",
             )
             return
@@ -184,7 +201,7 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
             return
         waiting[user.id] = {"mode": "promo_code"}
         await query.answer()
-        await say(query.message, "Введите промокод или напишите «авто», чтобы бот создал его сам.", image="admin")
+        await say(query.message, "Введите промокод или напишите «авто», чтобы бот создал его сам.", reply_markup=back_only(), image="admin")
 
     @dp.callback_query(F.data.startswith("adm:promokind:"))
     async def promo_kind(query: CallbackQuery) -> None:
@@ -200,7 +217,7 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
         state["mode"] = "promo_value"
         await query.answer()
         prompt = "Введите сумму в рублях." if state["kind"] == "balance" else "Введите срок в днях."
-        await say(query.message, prompt, image="admin")
+        await say(query.message, prompt, reply_markup=back_only(), image="admin")
 
     @dp.callback_query(F.data == "adm:selfsub")
     async def ask_self_sub(query: CallbackQuery) -> None:
