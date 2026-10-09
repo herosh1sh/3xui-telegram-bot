@@ -120,6 +120,11 @@ def telegram_check(params: dict[str, str]) -> bool:
 
 
 
+def plans_public(request):
+    from bot import PLANS
+    return JsonResponse({"plans": [{"days": days, "price": price} for days, price in PLANS.items()]})
+
+
 def telegram_config(request):
     token = os.environ.get("BOT_TOKEN", "")
     return JsonResponse({
