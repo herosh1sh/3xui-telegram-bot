@@ -1,0 +1,31 @@
+
+:root { --bg:#f6f4ef; --ink:#161616; --muted:#6d675f; --line:#e4dfd6; --card:#fffcf7; --accent:#1f6feb; --max:1080px; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 Manrope,Segoe UI,sans-serif; }
+a { color:inherit; }
+.wrap { width:min(var(--max), calc(100% - 32px)); margin:0 auto; }
+header { position:sticky; top:0; background:rgba(246,244,239,.92); border-bottom:1px solid var(--line); }
+.nav { display:flex; align-items:center; justify-content:space-between; min-height:68px; gap:16px; }
+.logo { font-weight:700; text-decoration:none; letter-spacing:-.04em; }
+.nav a.ghost, .button { text-decoration:none; }
+.button, button { border:0; border-radius:999px; min-height:42px; padding:0 16px; background:#161616; color:#fff; font:650 14px Manrope,sans-serif; cursor:pointer; }
+.button.ghost, button.ghost { background:transparent; color:#161616; border:1px solid var(--line); }
+button.blue { background:var(--accent); }
+button.green { background:#178a4c; }
+button.red { background:#b42318; }
+h1,h2 { font-family:Fraunces,Georgia,serif; letter-spacing:-.04em; font-weight:540; }
+h1 { font-size:clamp(40px,6vw,72px); line-height:.95; margin:0; }
+.lead { color:var(--muted); max-width:560px; }
+.grid, .plans, .cards { display:grid; gap:14px; }
+.grid { grid-template-columns:repeat(3,1fr); }
+.plans { grid-template-columns:repeat(3,1fr); }
+.cards { grid-template-columns:1.2fr .8fr; }
+.card, .plan { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:18px; }
+.muted { color:var(--muted); }
+.row { display:flex; gap:8px; flex-wrap:wrap; }
+input, select { border:1px solid var(--line); border-radius:12px; padding:10px 12px; font:inherit; background:#fff; }
+table { width:100%; border-collapse:collapse; font-size:14px; }
+td, th { text-align:left; padding:8px 0; border-bottom:1px solid var(--line); }
+.qr { width:180px; height:180px; background:#fff; border-radius:12px; }
+footer { border-top:1px solid var(--line); color:var(--muted); padding:24px 0 40px; font-size:14px; }
+@media (max-width:800px) { .grid,.plans,.cards { grid-template-columns:1fr; } }
