@@ -35,32 +35,12 @@ export default function Cabinet() {
   const [error, setError] = useState("");
   async function load() { setMe(await api("/api/me")); }
   useEffect(() => { load().catch(() => setMe(null)); }, []);
-  useEffect(() => {
-    if (me) return;
-    fetch("/api/telegram").then(res => res.json()).then(data => {
-      const box = document.getElementById("tg-login");
-      if (!box || !data.bot || box.dataset.ready) return;
-      box.dataset.ready = "1";
-      const script = document.createElement("script");
-      script.src = "https://telegram.org/js/telegram-widget.js?22";
-      script.async = true;
-      script.setAttribute("data-telegram-login", data.bot);
-      script.setAttribute("data-size", "large");
-      script.setAttribute("data-auth-url", window.location.origin + "/auth/telegram");
-      script.setAttribute("data-request-access", "write");
-      box.appendChild(script);
-    }).catch(e => setError(e.message));
-  }, [me]);
-
   if (!me) return (
     <Layout>
       <main className="shell hero">
         <h1>Вход</h1>
-        <p className="muted">Войдите через Telegram. Логин и пароль сайта больше не используются.</p>
-        <article className="card" style={{maxWidth:460}}>
-          <div id="tg-login" />
-          {error && <p>{error}</p>}
-        </article>
+        <p className="muted">Нажмите кнопку Telegram справа сверху.</p>
+        {error && <p>{error}</p>}
       </main>
     </Layout>
   );
