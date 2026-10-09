@@ -27,8 +27,5 @@ td { padding:9px 0; border-bottom:1px solid var(--line); }
 footer { margin-top:48px; padding:22px 0 40px; color:var(--muted); border-top:1px solid var(--line); }
 @media (max-width:800px) { .grid,.split { grid-template-columns:1fr; } .hero { padding-top:36px; } }
 
-.top { display:grid; grid-template-columns:42px 1fr 42px; }
-.drawer { position:fixed; inset:0 auto 0 0; width:min(280px, 86vw); background:#fffdf9; border-right:1px solid var(--line); transform:translateX(-105%); transition:.2s ease; z-index:4; padding:24px; display:flex; flex-direction:column; gap:14px; }
-.drawer.open { transform:none; }
-.backdrop { position:fixed; inset:0; background:rgba(23,23,23,.35); z-index:3; }
+.top { display:flex; justify-content:space-between; }
 .chart { width:100%; height:190px; }
