@@ -34,7 +34,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("bot")
 
-PLANS = {30: 100, 60: 250, 90: 500}
+PLANS = {30: 150, 90: 399, 180:900 }
 TOPUP = (100, 250, 500, 1000)
 MAX_TOPUP = 100000
 PRIVACY_URL = "https://telegra.ph/Politika-konfidencialnosti-HeroshishVPN-10-08"
