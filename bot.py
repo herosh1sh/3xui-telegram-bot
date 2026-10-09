@@ -122,11 +122,19 @@ def menu() -> ReplyKeyboardMarkup:
 PLAN_STYLE = {30: "primary", 60: "success", 90: "danger"}
 
 
+def plan_style(days: int) -> str:
+    return PLAN_STYLE.get(days, "primary")
+
+
+def plans_text() -> str:
+    return "\n".join(f"{days} дней — {price} ₽" for days, price in PLANS.items())
+
+
 def plans_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                btn(f"{days} дней", callback_data=f"buy:{days}", emoji="plan", style=PLAN_STYLE[days])
+                btn(f"{days} дней", callback_data=f"buy:{days}", emoji="plan", style=plan_style(days))
                 for days, price in PLANS.items()
             ],
             [btn("Вернуться", callback_data="back", emoji="back")],
@@ -414,7 +422,7 @@ async def sub_button(message: Message) -> None:
     if not sub_active(existing):
         await say(
             message,
-            "Подписки нет. Выберите срок:\n30 дней — 100 ₽\n60 дней — 250 ₽\n90 дней — 500 ₽",
+            f"Подписки нет. Выберите срок:\n{plans_text()}",
             reply_markup=plans_menu(),
             image="plans",
         )
@@ -546,7 +554,7 @@ async def plans(query: CallbackQuery) -> None:
         await query.answer("Нет доступа", show_alert=True)
         return
     await query.answer()
-    await say(query.message, "Выберите срок из предложенных вариантов:\n30 дней — 100 ₽\n60 дней — 250 ₽\n90 дней — 500 ₽", reply_markup=plans_menu(), image="plans")
+    await say(query.message, f"Выберите срок из предложенных вариантов:\n{plans_text()}", reply_markup=plans_menu(), image="plans")
 
 
 @dp.callback_query(F.data == "topup")
@@ -706,7 +714,7 @@ async def my_sub(query: CallbackQuery) -> None:
     await query.answer()
     existing = await live_sub(user.id)
     if not sub_active(existing):
-        await say(query.message, "Подписки нет. Выберите срок:\n30 дней — 100 ₽\n60 дней — 250 ₽\n90 дней — 500 ₽", reply_markup=plans_menu(), image="plans")
+        await say(query.message, f"Подписки нет. Выберите срок:\n{plans_text()}", reply_markup=plans_menu(), image="plans")
         return
     stats = await panel.client_traffic(existing["email"])
     text = format_card(
