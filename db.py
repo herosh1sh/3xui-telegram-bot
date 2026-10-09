@@ -51,6 +51,20 @@ CREATE TABLE IF NOT EXISTS reminders (
     mark INTEGER NOT NULL,
     PRIMARY KEY (tg_id, expiry_ms, mark)
 );
+CREATE TABLE IF NOT EXISTS promos (
+    code TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    value INTEGER NOT NULL,
+    max_uses INTEGER NOT NULL,
+    used INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS promo_uses (
+    code TEXT NOT NULL,
+    tg_id INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (code, tg_id)
+);
 """
 
 
@@ -255,3 +269,39 @@ class Store:
             )
             await db.commit()
             return cur.rowcount == 1
+
+    async def create_promo(self, code: str, kind: str, value: int, max_uses: int) -> str:
+        code = code.strip().upper()
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "INSERT INTO promos (code, kind, value, max_uses, used, created_at) VALUES (?, ?, ?, ?, 0, ?)",
+                (code, kind, value, max_uses, int(time.time())),
+            )
+            await db.commit()
+        return code
+
+    async def redeem_promo(self, code: str, tg_id: int) -> dict:
+        code = code.strip().upper()
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute("BEGIN")
+            cur = await db.execute("SELECT * FROM promos WHERE code = ?", (code,))
+            row = await cur.fetchone()
+            if not row:
+                await db.rollback()
+                raise ValueError("Промокод не найден")
+            promo = dict(row)
+            used = await db.execute("SELECT 1 FROM promo_uses WHERE code = ? AND tg_id = ?", (code, tg_id))
+            if await used.fetchone():
+                await db.rollback()
+                raise ValueError("Вы уже использовали этот промокод")
+            if promo["max_uses"] and promo["used"] >= promo["max_uses"]:
+                await db.rollback()
+                raise ValueError("Промокод закончился")
+            await db.execute("UPDATE promos SET used = used + 1 WHERE code = ?", (code,))
+            await db.execute(
+                "INSERT INTO promo_uses (code, tg_id, created_at) VALUES (?, ?, ?)",
+                (code, tg_id, int(time.time())),
+            )
+            await db.commit()
+            return promo
