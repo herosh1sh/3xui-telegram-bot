@@ -1,3 +1,4 @@
+import hashlib
 import json
 import secrets
 import time
@@ -13,6 +14,28 @@ from site_api import STATUS, ensure_site_tables, qr_data, when
 
 async def ready():
     await ensure_site_tables(store.path)
+    async with aiosqlite.connect(store.path) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS site_accounts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                login TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                tg_id INTEGER UNIQUE NOT NULL,
+                created_at INTEGER NOT NULL
+            )
+        """)
+        await db.commit()
+
+
+def hash_password(password: str, salt: str | None = None) -> str:
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 120000).hex()
+    return f"{salt}${digest}"
+
+
+def check_password(password: str, stored: str) -> bool:
+    salt, digest = stored.split("$", 1)
+    return hash_password(password, salt).split("$", 1)[1] == digest
 
 
 def spa(request):
@@ -82,6 +105,54 @@ async def history(tg_id):
         rows.append((order["created_at"], f"{title} {order['provider']}", int(order["amount_rub"]), STATUS.get(order["status"], order["status"])))
     rows.sort(reverse=True)
     return [{"when": when(ts), "title": title, "amount": amount, "status": status} for ts, title, amount, status in rows[:10]]
+
+
+async def set_session(tg_id: int):
+    session = secrets.token_urlsafe(24)
+    async with aiosqlite.connect(store.path) as db:
+        await db.execute("INSERT INTO web_sessions (token, tg_id, expires_at) VALUES (?, ?, ?)", (session, tg_id, int(time.time()) + 1209600))
+        await db.commit()
+    response = JsonResponse({"ok": True})
+    response.set_cookie("site_session", session, max_age=1209600, httponly=True, samesite="Lax")
+    return response
+
+
+@csrf_exempt
+async def register(request):
+    await ready()
+    data = await body(request)
+    login = str(data.get("login") or "").strip().lower()
+    password = str(data.get("password") or "")
+    if len(login) < 3 or len(password) < 6:
+        return JsonResponse({"error": "Логин от 3 символов, пароль от 6"}, status=400)
+    async with aiosqlite.connect(store.path) as db:
+        cur = await db.execute("SELECT MIN(tg_id) FROM site_accounts")
+        row = await cur.fetchone()
+        tg_id = int(row[0] or 0) - 1
+        try:
+            await db.execute(
+                "INSERT INTO site_accounts (login, password_hash, tg_id, created_at) VALUES (?, ?, ?, ?)",
+                (login, hash_password(password), tg_id, int(time.time())),
+            )
+            await db.commit()
+        except Exception:
+            return JsonResponse({"error": "Такой логин уже занят"}, status=400)
+    await store.ensure_user(tg_id, login)
+    return await set_session(tg_id)
+
+
+@csrf_exempt
+async def login_password(request):
+    await ready()
+    data = await body(request)
+    login = str(data.get("login") or "").strip().lower()
+    password = str(data.get("password") or "")
+    async with aiosqlite.connect(store.path) as db:
+        cur = await db.execute("SELECT password_hash, tg_id FROM site_accounts WHERE login = ?", (login,))
+        row = await cur.fetchone()
+    if not row or not check_password(password, row[0]):
+        return JsonResponse({"error": "Неверный логин или пароль"}, status=400)
+    return await set_session(int(row[1]))
 
 
 async def me(request):
