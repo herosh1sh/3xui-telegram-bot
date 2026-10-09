@@ -222,6 +222,15 @@ class Store:
             )
             await db.commit()
 
+    async def list_orders(self, tg_id: int, limit: int = 12) -> list[dict]:
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT * FROM orders WHERE tg_id = ? ORDER BY created_at DESC LIMIT ?",
+                (tg_id, limit),
+            )
+            return [dict(row) for row in await cur.fetchall()]
+
     async def list_events(self, tg_id: int, limit: int = 12) -> list[dict]:
         async with aiosqlite.connect(self.path) as db:
             db.row_factory = aiosqlite.Row
