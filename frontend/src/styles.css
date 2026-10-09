@@ -2,7 +2,7 @@
 * { box-sizing:border-box; }
 body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.55 Manrope,sans-serif; }
 a { color:inherit; text-decoration:none; }
-button, .btn { border:0; border-radius:999px; min-height:42px; padding:0 16px; background:#171717; color:#fff; font:650 14px Manrope,sans-serif; cursor:pointer; }
+button, .btn { display:inline-flex; align-items:center; justify-content:center; border:0; border-radius:999px; min-height:42px; padding:0 16px; background:#171717; color:#fff; font:650 14px Manrope,sans-serif; cursor:pointer; line-height:1; }
 .btn.ghost, button.ghost { background:transparent; color:#171717; border:1px solid var(--line); }
 button.blue { background:var(--accent); }
 button.green { background:var(--green); }
@@ -27,5 +27,9 @@ td { padding:9px 0; border-bottom:1px solid var(--line); }
 footer { margin-top:48px; padding:22px 0 40px; color:var(--muted); border-top:1px solid var(--line); }
 @media (max-width:800px) { .grid,.split { grid-template-columns:1fr; } .hero { padding-top:36px; } }
 
-.top { display:flex; justify-content:space-between; }
+.top { display:flex; justify-content:space-between; align-items:center; }
 .chart { width:100%; height:190px; }
+
+.plans { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:28px; }
+.plan strong { font-size:28px; }
+@media (max-width:800px) { .plans { grid-template-columns:1fr; } }
