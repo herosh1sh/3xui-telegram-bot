@@ -1,14 +1,29 @@
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import Layout from "../Layout";
 
 async function api(path, body) {
   const res = await fetch(path, { method: body ? "POST" : "GET", headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
   const raw = await res.text();
   let data = {};
   try { data = raw ? JSON.parse(raw) : {}; }
-  catch { throw new Error("Сервер вернул страницу вместо ответа. Django должен быть запущен, а nginx проксировать /api/."); }
+  catch { throw new Error("Сервер вернул страницу вместо ответа. Проверь, что Django запущен и nginx проксирует /api/ на порт 8000."); }
   if (!res.ok) throw new Error(data.error || "Ошибка");
   return data;
+}
+
+function Chart({ points }) {
+  if (!points?.length) return <p className="muted">График появится после первого захода в кабинет с активной подпиской.</p>;
+  const max = Math.max(...points.map(point => point.used), 1);
+  const width = 520;
+  const height = 180;
+  const step = points.length === 1 ? width : width / (points.length - 1);
+  const line = points.map((point, index) => `${index * step},${height - (point.used / max) * (height - 20)}`).join(" ");
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} className="chart" role="img" aria-label="Потребление трафика">
+      <polyline fill="none" stroke="#1d4ed8" strokeWidth="4" points={line} />
+      {points.map((point, index) => <text key={point.when} x={index * step} y={height - 2} fontSize="11">{point.when.slice(0, 5)}</text>)}
+    </svg>
+  );
 }
 
 export default function Cabinet() {
@@ -23,7 +38,6 @@ export default function Cabinet() {
 
   async function load() { setMe(await api("/api/me")); }
   useEffect(() => { load().catch(() => setMe(null)); }, []);
-
   async function submit(path) {
     setError("");
     try { await api(path, { login, password }); await load(); }
@@ -31,26 +45,25 @@ export default function Cabinet() {
   }
 
   if (!me) return (
-    <main className="shell hero">
-      <h1>Вход</h1>
-      <p className="muted">Зарегистрируйтесь по логину и паролю или войдите через Telegram.</p>
-      <article className="card" style={{maxWidth:460}}>
-        <input placeholder="Логин" value={login} onChange={e => setLogin(e.target.value)} />
-        <input style={{marginTop:8}} type="password" placeholder="Пароль" value={password} onChange={e => setPassword(e.target.value)} />
-        <div className="row" style={{marginTop:12}}>
-          <button onClick={() => submit("/api/login")}>Войти</button>
-          <button className="ghost" onClick={() => submit("/api/register")}>Регистрация</button>
-        </div>
-        <a className="btn" style={{display:"inline-flex", marginTop:14}} href="https://t.me/Heroshish">Войти через Telegram</a>
-        <p className="muted">После кнопки откройте бота и нажмите «Кабинет»: он пришлёт одноразовую ссылку.</p>
-        {error && <p>{error}</p>}
-      </article>
-    </main>
+    <Layout>
+      <main className="shell hero">
+        <h1>Вход</h1>
+        <p className="muted">Войдите по логину и паролю или зарегистрируйтесь.</p>
+        <article className="card" style={{maxWidth:460}}>
+          <input placeholder="Логин" value={login} onChange={e => setLogin(e.target.value)} />
+          <input style={{marginTop:8}} type="password" placeholder="Пароль" value={password} onChange={e => setPassword(e.target.value)} />
+          <div className="row" style={{marginTop:12}}>
+            <button onClick={() => submit("/api/login")}>Войти</button>
+            <button className="ghost" onClick={() => submit("/api/register")}>Регистрация</button>
+          </div>
+          {error && <p>{error}</p>}
+        </article>
+      </main>
+    </Layout>
   );
 
   return (
-    <>
-      <header className="shell top"><Link className="logo" to="/">HeroshishVPN</Link>{me.admin && <Link className="btn" to="/admin">Админка</Link>}</header>
+    <Layout authed admin={me.admin}>
       <main className="shell" style={{padding:"28px 0 48px"}}>
         <div className="split">
           <article className="card dark">
@@ -62,7 +75,7 @@ export default function Cabinet() {
             <button className="green" onClick={async () => setPay(await api("/api/topup", {amount:Number(amount), provider}))}>Пополнить</button>
             {pay && <p><a href={pay.pay_url}>Оплатить</a> <button onClick={async () => alert((await api("/api/check", {order_id:pay.order_id})).message)}>Проверить</button></p>}
           </article>
-          <article className="card">
+          <article className="card" id="subscription">
             <p className="muted">Подписка</p>
             {me.subscription ? <><p>Осталось: {me.subscription.left}<br/>Окончание: {me.subscription.until}<br/>Трафик: {me.subscription.traffic}</p><a href={me.subscription.url}>Подключиться</a><br/><img className="qr" src={me.subscription.qr} alt="QR" /></> : <p>Подписки нет. Выберите тариф или пробный день.</p>}
             <div className="row" style={{marginTop:12}}>{me.plans.map(plan => <button key={plan.days} onClick={() => api("/api/buy", {days:plan.days}).then(load).catch(e => setError(e.message))}>{plan.days} дн. · {plan.price} ₽</button>)}{me.trial && <button className="green" onClick={() => api("/api/trial", {}).then(load)}>Пробный {me.trial_days} дн.</button>}</div>
@@ -71,10 +84,14 @@ export default function Cabinet() {
           </article>
         </div>
         <article className="card" style={{marginTop:14}}>
+          <h2>Потребление трафика</h2>
+          <Chart points={me.traffic} />
+        </article>
+        <article className="card" id="history" style={{marginTop:14}}>
           <h2>История</h2>
           {me.history.length ? <table>{me.history.map((row, i) => <tr key={i}><td>{row.when}</td><td>{row.title}</td><td>{row.amount} ₽</td><td>{row.status}</td></tr>)}</table> : <p className="muted">Пока пусто.</p>}
         </article>
       </main>
-    </>
+    </Layout>
   );
 }
