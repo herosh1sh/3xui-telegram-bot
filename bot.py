@@ -97,6 +97,7 @@ pays = Payments(
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
 waiting_amount: set[int] = set()
+waiting_promo: set[int] = set()
 
 
 def main_keyboard(user_id: int) -> ReplyKeyboardMarkup:
@@ -186,6 +187,7 @@ def profile_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [btn("История", callback_data="history", emoji="profile", style="primary")],
+            [btn("Промокод", callback_data="promo", emoji="profile", style="success")],
             [btn("Вернуться", callback_data="back", emoji="back")],
         ]
     )
@@ -588,6 +590,46 @@ async def choose_topup(query: CallbackQuery) -> None:
         return
     await query.answer()
     await say(query.message, f"Пополнение на {amount} ₽. Выберите способ.", reply_markup=pay_menu(amount), image="pay")
+
+
+@dp.callback_query(F.data == "promo")
+async def ask_promo(query: CallbackQuery) -> None:
+    user = query.from_user
+    if not user or not allowed(user.id):
+        await query.answer("Нет доступа", show_alert=True)
+        return
+    waiting_promo.add(user.id)
+    await query.answer()
+    await say(query.message, "Введите промокод.", reply_markup=profile_menu(), image="profile")
+
+
+@dp.message(F.text)
+async def enter_promo(message: Message) -> None:
+    user = message.from_user
+    if not user or user.id not in waiting_promo:
+        return
+    waiting_promo.discard(user.id)
+    code = (message.text or "").strip()
+    if not code or code in {"Профиль", "Подписка", "Баланс", "Помощь", "О нас", "Админка"}:
+        await say(message, "Ввод промокода отменён.", reply_markup=profile_menu(), image="profile")
+        return
+    try:
+        promo = await store.redeem_promo(code, user.id)
+    except ValueError as exc:
+        await say(message, str(exc), reply_markup=profile_menu(), image="profile")
+        return
+    if promo["kind"] == "balance":
+        balance = await store.add_balance(user.id, int(promo["value"]))
+        await store.add_event(user.id, "promo", f"Промокод {code.upper()}", int(promo["value"]), "выдано")
+        await say(message, f"Начислено {promo['value']} ₽. Баланс: {balance} ₽.", reply_markup=profile_menu(), image="profile")
+        return
+    try:
+        text, sub_id = await issue(user.id, user.username, int(promo["value"]))
+    except PanelError as exc:
+        await say(message, f"Промокод принят, но панель отклонила выдачу: {exc}", image="plans")
+        return
+    await store.add_event(user.id, "promo", f"Промокод {code.upper()} на {promo['value']} дн.", 0, "выдано")
+    await send_sub(message, text, sub_id)
 
 
 @dp.message(F.text.regexp(r"^\d+$"))
