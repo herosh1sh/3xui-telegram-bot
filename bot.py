@@ -35,7 +35,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("bot")
 
 PLANS = {30: 150, 90: 399, 180:900 }
-TRIAL_DAYS = int(env("TRIAL_DAYS", "1") or 1)
 TOPUP = (100, 250, 500, 1000)
 MAX_TOPUP = 100000
 PRIVACY_URL = "https://telegra.ph/Politika-konfidencialnosti-HeroshishVPN-10-08"
@@ -70,6 +69,7 @@ ADMIN_IDS = {int(x) for x in env("ADMIN_IDS").split(",") if x.strip()}
 DB_PATH = env("DB_PATH", "data/subs.sqlite")
 VERIFY_SSL = env_bool("VERIFY_SSL", True)
 SUPPORT_URL = env("SUPPORT_URL", CHANNEL_URL)
+TRIAL_DAYS = int(env("TRIAL_DAYS", "1") or 1)
 
 if not BOT_TOKEN or not PANEL_URL or not SUB_BASE_URL:
     raise SystemExit("Заполните BOT_TOKEN, PANEL_URL и SUB_BASE_URL в .env")
