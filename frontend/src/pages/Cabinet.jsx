@@ -15,16 +15,33 @@ export default function Cabinet() {
   const [promo, setPromo] = useState("");
   const [pay, setPay] = useState(null);
   const [error, setError] = useState("");
+  const [login, setLogin] = useState("");
+  const [password, setPassword] = useState("");
 
-  async function load() {
-    setMe(await api("/api/me"));
-  }
+  async function load() { setMe(await api("/api/me")); }
   useEffect(() => { load().catch(() => setMe(null)); }, []);
+
+  async function submit(path) {
+    setError("");
+    try { await api(path, { login, password }); await load(); }
+    catch (e) { setError(e.message); }
+  }
 
   if (!me) return (
     <main className="shell hero">
       <h1>Вход</h1>
-      <p className="muted">В боте нажмите «Кабинет». Бот пришлёт одноразовую ссылку, она откроет этот кабинет.</p>
+      <p className="muted">Зарегистрируйтесь по логину и паролю или войдите через Telegram.</p>
+      <article className="card" style={{maxWidth:460}}>
+        <input placeholder="Логин" value={login} onChange={e => setLogin(e.target.value)} />
+        <input style={{marginTop:8}} type="password" placeholder="Пароль" value={password} onChange={e => setPassword(e.target.value)} />
+        <div className="row" style={{marginTop:12}}>
+          <button onClick={() => submit("/api/login")}>Войти</button>
+          <button className="ghost" onClick={() => submit("/api/register")}>Регистрация</button>
+        </div>
+        <a className="btn" style={{display:"inline-flex", marginTop:14}} href="https://t.me/Heroshish">Войти через Telegram</a>
+        <p className="muted">После кнопки откройте бота и нажмите «Кабинет»: он пришлёт одноразовую ссылку.</p>
+        {error && <p>{error}</p>}
+      </article>
     </main>
   );
 
