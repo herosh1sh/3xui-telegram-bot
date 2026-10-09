@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 
 from aiogram import F
 from aiogram.filters import BaseFilter
@@ -33,6 +34,7 @@ def admin_menu() -> InlineKeyboardMarkup:
                 btn("Себе подписку", callback_data="adm:selfsub", emoji="admin", style="primary"),
             ],
             [btn("Оповещение", callback_data="adm:announce", emoji="admin", style="danger")],
+            [btn("Промокод", callback_data="adm:promo", emoji="admin", style="success")],
         ]
     )
 
@@ -131,7 +133,27 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
         user = message.from_user
         if not user or not allowed(user.id) or user.id not in waiting:
             return
-        if waiting[user.id].get("mode") != "announce":
+        mode = waiting[user.id].get("mode")
+        if mode == "promo_code":
+            code = (message.text or "").strip()
+            if not code or code == "Админка":
+                waiting.pop(user.id, None)
+                await say(message, "Создание промокода отменено.", reply_markup=admin_menu(), image="admin")
+                return
+            if code.lower() == "авто":
+                code = secrets.token_hex(4).upper()
+            waiting[user.id] = {"mode": "promo_kind", "code": code.upper()}
+            await say(
+                message,
+                f"Код {code.upper()}. Что он даёт?",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    btn("Баланс", callback_data="adm:promokind:balance", emoji="admin", style="success"),
+                    btn("Дни", callback_data="adm:promokind:days", emoji="admin", style="primary"),
+                ]]),
+                image="admin",
+            )
+            return
+        if mode != "announce":
             return
         text = (message.text or "").strip()
         waiting.pop(user.id, None)
@@ -153,6 +175,32 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
             reply_markup=admin_menu(),
             image="admin",
         )
+
+    @dp.callback_query(F.data == "adm:promo")
+    async def ask_promo(query: CallbackQuery) -> None:
+        user = query.from_user
+        if not user or not allowed(user.id):
+            await query.answer("Нет доступа", show_alert=True)
+            return
+        waiting[user.id] = {"mode": "promo_code"}
+        await query.answer()
+        await say(query.message, "Введите промокод или напишите «авто», чтобы бот создал его сам.", image="admin")
+
+    @dp.callback_query(F.data.startswith("adm:promokind:"))
+    async def promo_kind(query: CallbackQuery) -> None:
+        user = query.from_user
+        if not user or not allowed(user.id) or user.id not in waiting:
+            await query.answer("Нет доступа", show_alert=True)
+            return
+        state = waiting[user.id]
+        if state.get("mode") != "promo_kind":
+            await query.answer("Сначала введите код", show_alert=True)
+            return
+        state["kind"] = query.data.split(":")[2]
+        state["mode"] = "promo_value"
+        await query.answer()
+        prompt = "Введите сумму в рублях." if state["kind"] == "balance" else "Введите срок в днях."
+        await say(query.message, prompt, image="admin")
 
     @dp.callback_query(F.data == "adm:selfsub")
     async def ask_self_sub(query: CallbackQuery) -> None:
@@ -196,10 +244,28 @@ def register(dp, store, bot, plans, admin_ids, issue, send_sub) -> None:
         if not user or not allowed(user.id) or user.id not in waiting:
             return
         state = waiting[user.id]
-        if state.get("mode") == "announce":
+        if state.get("mode") in {"announce", "promo_code", "promo_kind"}:
             return
         value = int(message.text or "0")
         mode = state.get("mode")
+        if mode == "promo_value":
+            if value < 1:
+                await say(message, "Значение должно быть больше нуля.", image="admin")
+                return
+            state["value"] = value
+            state["mode"] = "promo_uses"
+            await say(message, "Сколько раз можно активировать? 0 — без лимита.", image="admin")
+            return
+        if mode == "promo_uses":
+            waiting.pop(user.id, None)
+            if value < 0:
+                await say(message, "Лимит не может быть отрицательным.", reply_markup=admin_menu(), image="admin")
+                return
+            code = await store.create_promo(state["code"], state["kind"], int(state["value"]), value)
+            gift = f"{state['value']} ₽" if state["kind"] == "balance" else f"{state['value']} дн."
+            limit = "без лимита" if value == 0 else f"{value} активаций"
+            await say(message, f"Промокод `{code}` создан: {gift}, {limit}.", reply_markup=admin_menu(), image="admin")
+            return
         if mode == "balance" and "tg_id" not in state:
             state["tg_id"] = value
             await say(message, f"ID {value}. Теперь введите сумму в рублях.")
