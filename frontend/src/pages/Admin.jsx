@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import Layout from "../Layout";
 
 async function api(path, body) {
   const res = await fetch(path, { method: body ? "POST" : "GET", headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
-  const data = await res.json();
+  const raw = await res.text();
+  let data = {};
+  try { data = raw ? JSON.parse(raw) : {}; }
+  catch { throw new Error("Сервер вернул страницу вместо ответа."); }
   if (!res.ok) throw new Error(data.error || "Ошибка");
   return data;
 }
@@ -16,11 +19,10 @@ export default function Admin() {
   const set = (key, value) => setForm({...form, [key]: value});
 
   useEffect(() => { api("/api/admin/overview").then(setData).catch(e => setNote(e.message)); }, []);
-  if (!data) return <main className="shell hero"><h1>{note || "Загрузка"}</h1></main>;
+  if (!data) return <Layout authed admin><main className="shell hero"><h1>{note || "Загрузка"}</h1></main></Layout>;
 
   return (
-    <>
-      <header className="shell top"><Link className="logo" to="/cabinet">HeroshishVPN</Link><Link className="btn ghost" to="/cabinet">Кабинет</Link></header>
+    <Layout authed admin>
       <main className="shell" style={{padding:"28px 0 48px"}}>
         <h1>Админка</h1>
         <section className="grid">{data.stats.map(item => <article className="card" key={item.label}><h2>{item.value}</h2><p className="muted">{item.label}</p></article>)}</section>
@@ -60,6 +62,6 @@ export default function Admin() {
           <table>{data.orders.map((order, i) => <tr key={i}><td>{order.when}</td><td>{order.tg_id}</td><td>{order.provider}</td><td>{order.amount} ₽</td><td>{order.status}</td></tr>)}</table>
         </article>
       </main>
-    </>
+    </Layout>
   );
 }
