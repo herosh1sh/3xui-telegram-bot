@@ -6,6 +6,7 @@ urlpatterns = [
     path("cabinet", views.spa),
     path("admin", views.spa),
     path("auth", views.auth),
+    path("api/plans", views.plans_public),
     path("api/telegram", views.telegram_config),
     path("auth/telegram", views.telegram_login),
     path("api/me", views.me),
