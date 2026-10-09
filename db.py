@@ -33,7 +33,23 @@ CREATE TABLE IF NOT EXISTS users (
     tg_id INTEGER UNIQUE NOT NULL,
     username TEXT,
     balance INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    trial_used INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tg_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    amount_rub INTEGER NOT NULL,
+    status TEXT NOT NULL,
     created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS reminders (
+    tg_id INTEGER NOT NULL,
+    expiry_ms INTEGER NOT NULL,
+    mark INTEGER NOT NULL,
+    PRIMARY KEY (tg_id, expiry_ms, mark)
 );
 """
 
@@ -46,6 +62,15 @@ class Store:
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(self.path) as db:
             await db.executescript(SCHEMA)
+            for column, definition in (("trial_used", "INTEGER NOT NULL DEFAULT 0"),):
+                try:
+                    await db.execute(f"ALTER TABLE users ADD COLUMN {column} {definition}")
+                except Exception:
+                    pass
+            try:
+                await db.execute("ALTER TABLE subs ADD COLUMN is_trial INTEGER NOT NULL DEFAULT 0")
+            except Exception:
+                pass
             await db.commit()
 
     async def get(self, tg_id: int) -> dict | None:
@@ -62,20 +87,21 @@ class Store:
         email: str,
         sub_id: str,
         expiry_ms: int,
+        is_trial: bool = False,
     ) -> None:
         async with aiosqlite.connect(self.path) as db:
             await db.execute(
                 """
-                INSERT INTO subs (tg_id, username, email, sub_id, created_at, expiry_ms)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO subs (tg_id, username, email, sub_id, created_at, expiry_ms, is_trial)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(tg_id) DO UPDATE SET
                     username = excluded.username,
                     email = excluded.email,
                     sub_id = excluded.sub_id,
-                    created_at = excluded.created_at,
-                    expiry_ms = excluded.expiry_ms
+                    expiry_ms = excluded.expiry_ms,
+                    is_trial = excluded.is_trial
                 """,
-                (tg_id, username or "", email, sub_id, int(time.time()), expiry_ms),
+                (tg_id, username or "", email, sub_id, int(time.time()), expiry_ms, int(is_trial)),
             )
             await db.commit()
 
@@ -161,6 +187,57 @@ class Store:
             cur = await db.execute("SELECT * FROM users WHERE tg_id = ?", (tg_id,))
             row = await cur.fetchone()
             return dict(row)
+
+
+    async def trial_used(self, tg_id: int) -> bool:
+        async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute("SELECT trial_used FROM users WHERE tg_id = ?", (tg_id,))
+            row = await cur.fetchone()
+            return bool(row and row[0])
+
+    async def mark_trial(self, tg_id: int) -> None:
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute("UPDATE users SET trial_used = 1 WHERE tg_id = ?", (tg_id,))
+            await db.commit()
+
+    async def add_event(self, tg_id: int, kind: str, title: str, amount_rub: int, status: str) -> None:
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "INSERT INTO events (tg_id, kind, title, amount_rub, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (tg_id, kind, title, amount_rub, status, int(time.time())),
+            )
+            await db.commit()
+
+    async def list_events(self, tg_id: int, limit: int = 12) -> list[dict]:
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT * FROM events WHERE tg_id = ? ORDER BY id DESC LIMIT ?",
+                (tg_id, limit),
+            )
+            return [dict(row) for row in await cur.fetchall()]
+
+    async def list_subs(self) -> list[dict]:
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute("SELECT tg_id, expiry_ms, is_trial FROM subs")
+            return [dict(row) for row in await cur.fetchall()]
+
+    async def reminder_sent(self, tg_id: int, expiry_ms: int, mark: int) -> bool:
+        async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute(
+                "SELECT 1 FROM reminders WHERE tg_id = ? AND expiry_ms = ? AND mark = ?",
+                (tg_id, expiry_ms, mark),
+            )
+            return await cur.fetchone() is not None
+
+    async def mark_reminder(self, tg_id: int, expiry_ms: int, mark: int) -> None:
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO reminders (tg_id, expiry_ms, mark) VALUES (?, ?, ?)",
+                (tg_id, expiry_ms, mark),
+            )
+            await db.commit()
 
     async def add_balance(self, tg_id: int, amount: int) -> int:
         async with aiosqlite.connect(self.path) as db:
