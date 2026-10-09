@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="apay-tag" content="RQUMVEZW5NOIIEUTCBJAYYB6PT2AVZ2C">
+  <title>Кабинет — HeroshishVPN</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header><div class="wrap nav"><a class="logo" href="/">HeroshishVPN</a><span id="nav-extra"></span></div></header>
+  <main class="wrap" style="padding:32px 0 64px">
+    <section id="login">
+      <h1>Вход</h1>
+      <p class="lead">В боте нажмите «Кабинет». Бот пришлёт одноразовую ссылку, она откроет этот кабинет.</p>
+    </section>
+    <section id="app" hidden>
+      <div class="cards">
+        <article class="card">
+          <p class="muted">Профиль</p>
+          <h2 id="balance">0 ₽</h2>
+          <p id="ids" class="muted"></p>
+          <div class="row">
+            <input id="amount" type="number" min="1" placeholder="Сумма, ₽">
+            <button class="green" onclick="topup()">Пополнить</button>
+          </div>
+          <div id="providers" class="row" style="margin-top:10px"></div>
+          <p id="paybox" class="muted"></p>
+        </article>
+        <article class="card">
+          <p class="muted">Подписка</p>
+          <div id="sub"></div>
+          <div id="plans" class="row" style="margin-top:12px"></div>
+          <div class="row" style="margin-top:12px">
+            <input id="promo" placeholder="Промокод">
+            <button class="blue" onclick="redeem()">Активировать</button>
+          </div>
+        </article>
+      </div>
+      <article class="card" style="margin-top:14px">
+        <h2>История</h2>
+        <div id="history"></div>
+      </article>
+    </section>
+  </main>
+  <script>
+    let me = null;
+    const rub = n => `${n} ₽`;
+    async function api(path, body) {
+      const res = await fetch(path, {method: body ? "POST" : "GET", headers: {"Content-Type": "application/json"}, body: body ? JSON.stringify(body) : undefined});
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Ошибка");
+      return data;
+    }
+    function draw() {
+      document.getElementById("login").hidden = true;
+      document.getElementById("app").hidden = false;
+      document.getElementById("balance").textContent = rub(me.balance);
+      document.getElementById("ids").textContent = `Telegram ID ${me.tg_id} · ID в боте ${me.bot_id}`;
+      if (me.admin) document.getElementById("nav-extra").innerHTML = '<a class="button" href="/admin">Админка</a>';
+      const sub = document.getElementById("sub");
+      if (me.subscription) {
+        const s = me.subscription;
+        sub.innerHTML = `<p>Осталось: ${s.left}<br>Окончание: ${s.until}<br>Трафик: ${s.traffic}</p><p><a href="${s.url}">Подключиться</a></p>` + (s.qr ? `<img class="qr" alt="QR" src="${s.qr}">` : "");
+      } else {
+        sub.innerHTML = "<p>Подписки нет. Выберите тариф или пробный день.</p>";
+      }
+      document.getElementById("plans").innerHTML = me.plans.map(p => `<button onclick="buy(${p.days})">${p.days} дн. · ${p.price} ₽</button>`).join("") + (me.trial ? `<button class="green" onclick="trial()">Пробный ${me.trial_days} дн.</button>` : "");
+      document.getElementById("providers").innerHTML = me.providers.map(p => `<button class="ghost" onclick="pickProvider('${p.code}')">${p.title}</button>`).join("");
+      document.getElementById("history").innerHTML = me.history.length ? `<table>${me.history.map(h => `<tr><td>${h.when}</td><td>${h.title}</td><td>${h.amount} ₽</td><td>${h.status}</td></tr>`).join("")}</table>` : "<p class='muted'>Пока пусто.</p>";
+    }
+    async function load() {
+      try { me = await api("/api/me"); draw(); }
+      catch (e) { document.getElementById("login").hidden = false; }
+    }
+    let provider = "";
+    function pickProvider(code) { provider = code; document.getElementById("paybox").textContent = `Выбран способ: ${code}`; }
+    async function topup() {
+      const amount = Number(document.getElementById("amount").value);
+      if (!provider) return alert("Выберите способ оплаты");
+      const data = await api("/api/topup", {amount, provider});
+      document.getElementById("paybox").innerHTML = `<a href="${data.pay_url}">Оплатить</a> <button onclick="checkPay('${data.order_id}')">Проверить</button>`;
+    }
+    async function checkPay(orderId) {
+      const data = await api("/api/check", {order_id: orderId});
+      alert(data.message);
+      await load();
+    }
+    async function buy(days) { await api("/api/buy", {days}); await load(); }
+    async function trial() { await api("/api/trial", {}); await load(); }
+    async function redeem() { await api("/api/promo", {code: document.getElementById("promo").value}); await load(); }
+    load();
+  </script>
+</body>
+</html>
