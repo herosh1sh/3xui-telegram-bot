@@ -35,6 +35,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("bot")
 
 PLANS = {30: 150, 90: 399, 180:900 }
+TRIAL_DAYS = int(env("TRIAL_DAYS", "1") or 1)
 TOPUP = (100, 250, 500, 1000)
 MAX_TOPUP = 100000
 PRIVACY_URL = "https://telegra.ph/Politika-konfidencialnosti-HeroshishVPN-10-08"
@@ -130,16 +131,15 @@ def plans_text() -> str:
     return "\n".join(f"{days} дней — {price} ₽" for days, price in PLANS.items())
 
 
-def plans_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                btn(f"{days} дней", callback_data=f"buy:{days}", emoji="plan", style=plan_style(days))
-                for days, price in PLANS.items()
-            ],
-            [btn("Вернуться", callback_data="back", emoji="back")],
-        ]
-    )
+def plans_menu(trial: bool = False) -> InlineKeyboardMarkup:
+    rows = [[
+        btn(f"{days} дней", callback_data=f"buy:{days}", emoji="plan", style=plan_style(days))
+        for days, price in PLANS.items()
+    ]]
+    if trial:
+        rows.append([btn(f"Пробный {TRIAL_DAYS} дн.", callback_data="trial", emoji="plan", style="success")])
+    rows.append([btn("Вернуться", callback_data="back", emoji="back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def topup_text() -> str:
@@ -184,7 +184,10 @@ def about_menu() -> InlineKeyboardMarkup:
 
 def profile_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[[btn("Вернуться", callback_data="back", emoji="back")]]
+        inline_keyboard=[
+            [btn("История", callback_data="history", emoji="profile", style="primary")],
+            [btn("Вернуться", callback_data="back", emoji="back")],
+        ]
     )
 
 
@@ -329,7 +332,7 @@ async def live_sub(tg_id: int) -> dict | None:
     return row
 
 
-async def issue(tg_id: int, username: str | None, days: int) -> tuple[str, str]:
+async def issue(tg_id: int, username: str | None, days: int, is_trial: bool = False) -> tuple[str, str]:
     email = f"tg{tg_id}"
     existing = await live_sub(tg_id)
     now_ms = int(time.time() * 1000)
@@ -370,7 +373,7 @@ async def issue(tg_id: int, username: str | None, days: int) -> tuple[str, str]:
         created = await panel.get_client(email)
         if created and created.get("subId"):
             sub_id = str(created["subId"])
-    await store.save(tg_id, username, email, sub_id, expiry_ms)
+    await store.save(tg_id, username, email, sub_id, expiry_ms, is_trial=is_trial)
     links = await panel.client_links(email)
     return format_card(email, sub_id, expiry_ms, links), sub_id
 
@@ -420,10 +423,12 @@ async def sub_button(message: Message) -> None:
         return
     existing = await live_sub(user.id)
     if not sub_active(existing):
+        trial = not await store.trial_used(user.id)
+        extra = f"\nПробный период: {TRIAL_DAYS} дн., один раз и без оплаты." if trial else ""
         await say(
             message,
-            f"Подписки нет. Выберите срок:\n{plans_text()}",
-            reply_markup=plans_menu(),
+            f"Подписки нет. Выберите срок:\n{plans_text()}{extra}",
+            reply_markup=plans_menu(trial),
             image="plans",
         )
         return
@@ -641,6 +646,7 @@ async def cancel_payment(query: CallbackQuery) -> None:
         await query.answer("Оплата уже зачислена", show_alert=True)
         return
     await store.mark_order(order["order_id"], "canceled")
+    await store.add_event(user.id, "topup", f"Пополнение {order['provider']}", int(order["amount_rub"]), "canceled")
     await query.answer("Оплата отменена")
     await say(query.message, topup_text(), reply_markup=topup_menu(), image="topup")
 
@@ -673,7 +679,57 @@ async def check_payment(query: CallbackQuery) -> None:
         return
     await store.mark_order(order["order_id"], "paid")
     balance = await store.add_balance(user.id, int(order["amount_rub"]))
+    await store.add_event(user.id, "topup", f"Пополнение {order['provider']}", int(order["amount_rub"]), "paid")
     await say(query.message, f"Баланс пополнен. Сейчас {balance} ₽.", image="topup")
+
+
+
+@dp.callback_query(F.data == "trial")
+async def take_trial(query: CallbackQuery) -> None:
+    user = query.from_user
+    if not user or not allowed(user.id):
+        await query.answer("Нет доступа", show_alert=True)
+        return
+    await query.answer()
+    await store.ensure_user(user.id, user.username)
+    if await store.trial_used(user.id):
+        await say(query.message, f"Пробный период уже использован.\n{plans_text()}", reply_markup=plans_menu(), image="plans")
+        return
+    existing = await live_sub(user.id)
+    if sub_active(existing):
+        await say(query.message, "Подписка уже активна.", image="sub")
+        return
+    try:
+        text, sub_id = await issue(user.id, user.username, TRIAL_DAYS, is_trial=True)
+    except PanelError as exc:
+        await say(query.message, f"Панель отклонила пробный период: {exc}", image="plans")
+        return
+    await store.mark_trial(user.id)
+    await store.add_event(user.id, "trial", f"Пробный период {TRIAL_DAYS} дн.", 0, "выдано")
+    await send_sub(query.message, text, sub_id)
+
+
+STATUS_TITLE = {"paid": "оплачено", "canceled": "отменено", "pending": "ожидает", "выдано": "выдано", "куплено": "куплено"}
+
+
+@dp.callback_query(F.data == "history")
+async def history(query: CallbackQuery) -> None:
+    user = query.from_user
+    if not user or not allowed(user.id):
+        await query.answer("Нет доступа", show_alert=True)
+        return
+    await query.answer()
+    events = await store.list_events(user.id)
+    if not events:
+        await say(query.message, "История пуста.", reply_markup=profile_menu(), image="profile")
+        return
+    import datetime as dt
+    lines = ["История", ""]
+    for event in events:
+        when = dt.datetime.fromtimestamp(event["created_at"]).strftime("%d.%m.%Y %H:%M")
+        status = STATUS_TITLE.get(event["status"], event["status"])
+        lines.append(f"{when} — {event['title']} — {event['amount_rub']} ₽ — {status}")
+    await say(query.message, "\n".join(lines), reply_markup=profile_menu(), image="profile")
 
 
 @dp.callback_query(F.data.startswith("buy:"))
@@ -714,7 +770,9 @@ async def my_sub(query: CallbackQuery) -> None:
     await query.answer()
     existing = await live_sub(user.id)
     if not sub_active(existing):
-        await say(query.message, f"Подписки нет. Выберите срок:\n{plans_text()}", reply_markup=plans_menu(), image="plans")
+        trial = not await store.trial_used(user.id)
+        extra = f"\nПробный период: {TRIAL_DAYS} дн., один раз и без оплаты." if trial else ""
+        await say(query.message, f"Подписки нет. Выберите срок:\n{plans_text()}{extra}", reply_markup=plans_menu(trial), image="plans")
         return
     stats = await panel.client_traffic(existing["email"])
     text = format_card(
@@ -770,6 +828,41 @@ async def revoke(message: Message) -> None:
     await say(message, f"Подписка {row['email']} отозвана.", image="admin")
 
 
+
+async def reminder_loop() -> None:
+    from ui import notify
+    while True:
+        try:
+            now_ms = int(time.time() * 1000)
+            for row in await store.list_subs():
+                expiry = int(row["expiry_ms"] or 0)
+                if expiry <= 0:
+                    continue
+                left = expiry - now_ms
+                days = (left + 86_400_000 - 1) // 86_400_000 if left > 0 else 0
+                marks = []
+                if days in (1, 3):
+                    marks.append(days)
+                if left <= 0 and row.get("is_trial"):
+                    marks.append(0)
+                for mark in marks:
+                    if await store.reminder_sent(row["tg_id"], expiry, mark):
+                        continue
+                    if mark == 0:
+                        text = f"Пробный период закончился. Можно купить подписку:\n{plans_text()}"
+                    else:
+                        text = f"Подписка закончится через {mark} дн. Продлить можно в «Подписка»."
+                    try:
+                        await notify(bot, row["tg_id"], text)
+                    except Exception:
+                        log.info("reminder to %s failed", row["tg_id"])
+                    await store.mark_reminder(row["tg_id"], expiry, mark)
+                    await asyncio.sleep(0.05)
+        except Exception:
+            log.exception("reminder loop failed")
+        await asyncio.sleep(3600)
+
+
 async def main() -> None:
     from aiohttp import web
 
@@ -784,9 +877,11 @@ async def main() -> None:
     port = int(env("WEBAPP_PORT", "8080") or 8080)
     await web.TCPSite(runner, "0.0.0.0", port).start()
     log.info("bot started, inbounds=%s, return page=%s", INBOUND_IDS, port)
+    reminders = asyncio.create_task(reminder_loop())
     try:
         await dp.start_polling(bot)
     finally:
+        reminders.cancel()
         await runner.cleanup()
         await panel.close()
         await pays.close()
