@@ -297,3 +297,12 @@ async def ensure_site_tables(path: str) -> None:
         await db.execute("CREATE TABLE IF NOT EXISTS web_tokens (token TEXT PRIMARY KEY, tg_id INTEGER NOT NULL, expires_at INTEGER NOT NULL)")
         await db.execute("CREATE TABLE IF NOT EXISTS web_sessions (token TEXT PRIMARY KEY, tg_id INTEGER NOT NULL, expires_at INTEGER NOT NULL)")
         await db.commit()
+
+
+async def create_login_link(store, public_url: str, tg_id: int) -> str:
+    await ensure_site_tables(store.path)
+    token = secrets.token_urlsafe(18)
+    async with aiosqlite.connect(store.path) as db:
+        await db.execute("INSERT INTO web_tokens (token, tg_id, expires_at) VALUES (?, ?, ?)", (token, tg_id, int(time.time()) + 900))
+        await db.commit()
+    return f"{public_url.rstrip('/')}/auth?token={token}"
