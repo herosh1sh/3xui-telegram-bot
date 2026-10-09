@@ -115,6 +115,7 @@ def main_keyboard(user_id: int) -> ReplyKeyboardMarkup:
         [
             key_btn("Помощь", emoji="support"),
             key_btn("О нас", emoji="about"),
+            key_btn("Кабинет", emoji="profile", style="primary"),
         ],
     ]
     if user_id in ADMIN_IDS:
@@ -492,6 +493,15 @@ async def help_button(message: Message) -> None:
     if not message.from_user or not allowed(message.from_user.id):
         return
     await say(message, f"Поддержка: {SUPPORT_URL}", reply_markup=profile_menu(), image="support")
+
+
+@dp.message(F.text.endswith("Кабинет"))
+async def cabinet_button(message: Message) -> None:
+    user = message.from_user
+    if not user or not allowed(user.id):
+        return
+    link = await SITE_APP["site_link"](user.id)
+    await say(message, f"Личный кабинет:\n{link}", image="profile")
 
 
 @dp.message(F.text.endswith("О нас"))
@@ -914,15 +924,24 @@ async def reminder_loop() -> None:
         await asyncio.sleep(3600)
 
 
+SITE_APP = None
+
+
 async def main() -> None:
+    global SITE_APP
     from aiohttp import web
 
     from pay_return import add_routes
+    from site_api import add_site, ensure_site_tables
 
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     await store.init()
     app = web.Application()
     add_routes(app, store, pays, bot)
+    await ensure_site_tables(DB_PATH)
+    public = env("PUBLIC_URL") or f"http://127.0.0.1:{int(env('WEBAPP_PORT', '8080') or 8080)}"
+    add_site(app, store, panel, pays, bot, PLANS, ADMIN_IDS, issue, TRIAL_DAYS, public, sub_url)
+    SITE_APP = app
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(env("WEBAPP_PORT", "8080") or 8080)
