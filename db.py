@@ -159,6 +159,12 @@ class Store:
             row = await cur.fetchone()
             return dict(row) if row else None
 
+    async def list_pending_orders(self) -> list[dict]:
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute("SELECT * FROM orders WHERE status = 'pending'")
+            return [dict(row) for row in await cur.fetchall()]
+
     async def mark_order(self, order_id: str, status: str) -> None:
         async with aiosqlite.connect(self.path) as db:
             await db.execute("UPDATE orders SET status = ? WHERE order_id = ?", (status, order_id))
