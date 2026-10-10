@@ -12,6 +12,7 @@ from pathlib import Path
 
 import qrcode
 from aiogram import Bot, Dispatcher, F
+from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
@@ -644,8 +645,8 @@ async def ask_promo(query: CallbackQuery) -> None:
 @dp.message(F.text)
 async def enter_promo(message: Message) -> None:
     user = message.from_user
-    if not user or user.id not in waiting_promo:
-        return
+    if not user or user.id not in waiting_promo or user.id in waiting_amount:
+        raise SkipHandler()
     waiting_promo.discard(user.id)
     code = (message.text or "").strip()
     if not code or code in {"Профиль", "Подписка", "Баланс", "Помощь", "О нас", "Админка"}:
@@ -670,13 +671,13 @@ async def enter_promo(message: Message) -> None:
     await send_sub(message, text, sub_id)
 
 
-@dp.message(F.text.regexp(r"^\d+$"))
+@dp.message(F.text.regexp(r"^\s*\d+\s*$"))
 async def custom_amount(message: Message) -> None:
     user = message.from_user
     if not user or user.id not in waiting_amount:
-        return
+        raise SkipHandler()
     waiting_amount.discard(user.id)
-    amount = int(message.text or "0")
+    amount = int((message.text or "0").strip())
     if amount < 1 or amount > MAX_TOPUP:
         await say(message, f"Сумма от 1 до {MAX_TOPUP} ₽.", reply_markup=topup_menu(), image="topup")
         return
