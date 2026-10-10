@@ -908,8 +908,7 @@ async def revoke(message: Message) -> None:
 
 
 
-async def expire_invoice(order_id: str, tg_id: int) -> None:
-    await asyncio.sleep(PAY_TTL)
+async def close_expired(order_id: str, tg_id: int) -> None:
     order = await store.get_order(order_id)
     if not order or order["status"] != "pending":
         return
@@ -930,6 +929,11 @@ async def expire_invoice(order_id: str, tg_id: int) -> None:
         log.info("expire notice to %s failed", tg_id)
 
 
+async def expire_invoice(order_id: str, tg_id: int) -> None:
+    await asyncio.sleep(PAY_TTL)
+    await close_expired(order_id, tg_id)
+
+
 async def payment_watch() -> None:
     while True:
         try:
@@ -937,7 +941,7 @@ async def payment_watch() -> None:
             for order in await store.list_pending_orders():
                 if int(order["created_at"]) + PAY_TTL > now:
                     continue
-                await expire_invoice(order["order_id"], int(order["tg_id"]))
+                await close_expired(order["order_id"], int(order["tg_id"]))
         except Exception:
             log.exception("payment watch failed")
         await asyncio.sleep(30)
