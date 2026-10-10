@@ -38,6 +38,7 @@ log = logging.getLogger("bot")
 PLANS = {30: 150, 90: 399, 180:900 }
 TOPUP = (100, 250, 500, 1000)
 MAX_TOPUP = 100000
+PAY_TTL = 5 * 60
 PRIVACY_URL = "https://telegra.ph/Politika-konfidencialnosti-HeroshishVPN-10-08"
 OFFER_URL = "https://telegra.ph/Publichnaya-oferta-na-uslugi-HeroshishVPN-10-08"
 CHANNEL_URL = "https://t.me/Heroshish"
@@ -705,9 +706,10 @@ async def create_payment(query: CallbackQuery) -> None:
         await say(query.message, f"Не удалось создать счёт: {exc}", image="pay")
         return
     await store.save_order(order_id, user.id, user.username, 0, amount, provider, invoice.provider_id, invoice.pay_url)
+    asyncio.create_task(expire_invoice(order_id, user.id))
     await say(
         query.message,
-        f"Счёт на {amount} ₽. После оплаты нажмите «Проверить».",
+        f"Счёт на {amount} ₽. Оплатите в течение 5 минут, затем нажмите «Проверить».",
         image="pay",
         reply_markup=invoice_menu(invoice.pay_url, order_id),
     )
@@ -743,6 +745,12 @@ async def check_payment(query: CallbackQuery) -> None:
         return
     if order["status"] == "paid":
         await query.answer("Уже зачислено", show_alert=True)
+        return
+    if order["status"] == "canceled" or int(order["created_at"]) + PAY_TTL < int(time.time()):
+        if order["status"] != "canceled":
+            await store.mark_order(order["order_id"], "canceled")
+        await query.answer("Время вышло", show_alert=True)
+        await say(query.message, "Время на оплату вышло. Счёт отменён.", reply_markup=topup_menu(), image="pay")
         return
     await query.answer("Проверяю…")
     try:
@@ -900,6 +908,41 @@ async def revoke(message: Message) -> None:
 
 
 
+async def expire_invoice(order_id: str, tg_id: int) -> None:
+    await asyncio.sleep(PAY_TTL)
+    order = await store.get_order(order_id)
+    if not order or order["status"] != "pending":
+        return
+    try:
+        if await pays.is_paid(order["provider"], order["provider_id"]):
+            await store.mark_order(order_id, "paid")
+            balance = await store.add_balance(tg_id, int(order["amount_rub"]))
+            await store.add_event(tg_id, "topup", f"Пополнение {order['provider']}", int(order["amount_rub"]), "paid")
+            await bot.send_message(tg_id, f"Оплата получена. Баланс: {balance} ₽.")
+            return
+    except Exception:
+        log.info("expire check failed for %s", order_id)
+    await store.mark_order(order_id, "canceled")
+    await store.add_event(tg_id, "topup", f"Пополнение {order['provider']}", int(order["amount_rub"]), "canceled")
+    try:
+        await bot.send_message(tg_id, "Время на оплату вышло. Счёт отменён, деньги не списаны.")
+    except Exception:
+        log.info("expire notice to %s failed", tg_id)
+
+
+async def payment_watch() -> None:
+    while True:
+        try:
+            now = int(time.time())
+            for order in await store.list_pending_orders():
+                if int(order["created_at"]) + PAY_TTL > now:
+                    continue
+                await expire_invoice(order["order_id"], int(order["tg_id"]))
+        except Exception:
+            log.exception("payment watch failed")
+        await asyncio.sleep(30)
+
+
 async def reminder_loop() -> None:
     from ui import notify
     while True:
@@ -958,10 +1001,12 @@ async def main() -> None:
     await web.TCPSite(runner, "0.0.0.0", port).start()
     log.info("bot started, inbounds=%s, return page=%s", INBOUND_IDS, port)
     reminders = asyncio.create_task(reminder_loop())
+    payments = asyncio.create_task(payment_watch())
     try:
         await dp.start_polling(bot)
     finally:
         reminders.cancel()
+        payments.cancel()
         await runner.cleanup()
         await panel.close()
         await pays.close()
